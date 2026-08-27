@@ -113,6 +113,8 @@
     var params = new URLSearchParams(location.search);
     var EID = params.get('eid') || '';
     var MODE = params.get('mode') === 'whoami' ? 'whoami' : 'normal';
+    // ?demo=1 : LINEログイン・実サーバーを使わず、画面デザイン確認用の固定データで一連の流れを試せるモード
+    var DEMO = params.get('demo') === '1';
 
     function showOverlay() {
       var el = document.getElementById('processingOverlay');
@@ -123,8 +125,56 @@
       if (el) el.classList.remove('is-active');
     }
 
+    // デモモード用の固定データ。DOC_TYPES(model.ts)の全ステータス・全条件パターンを一通り見せる。
+    var DEMO_JOB_TYPES = ['整備士', '営業職', '事務職'];
+    var DEMO_EMPLOYEE = { id: 'DEMO0001', name: '山田 太郎', company: 'ホンダカーズ佐賀', commute: '車', hireDate: '2026-10-01' };
+    var DEMO_DOCS = [
+      { key: 'guarantor', label: '身元保証書', description: '内定者本人と保証人が記入する書類です。必ずボールペンで記入してください。', requiresOriginal: true, pdfAllowed: false, status: '原本提出待ち', submittedAt: '2026-08-20', rejectReason: '', rejectedAt: '' },
+      { key: 'bank', label: '給与振込先届', description: '通帳のコピーなど、口座名義・口座番号・支店名がわかるものを提出してください。', requiresOriginal: false, pdfAllowed: false, status: '承認済', submittedAt: '2026-08-18', rejectReason: '', rejectedAt: '' },
+      { key: 'myNumber', label: 'マイナンバー確認書類', description: 'マイナンバーカード(両面)、または通知カード＋本人確認書類の写しを提出してください。', requiresOriginal: false, pdfAllowed: false, status: '確認中', submittedAt: '2026-08-25', rejectReason: '', rejectedAt: '' },
+      { key: 'residence', label: '住民票', description: '「住民票謄本」(世帯全員が記載されたもの)を提出してください。', requiresOriginal: false, pdfAllowed: false, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'health', label: '健康診断書', description: '直近1年以内に受診したものを提出してください。', requiresOriginal: false, pdfAllowed: true, status: '差し戻し', submittedAt: '2026-08-15', rejectReason: '画像が不鮮明です。文字がはっきり読める写真を再度アップロードしてください。', rejectedAt: '2026-08-16' },
+      { key: 'withholding', label: '源泉徴収票(前職分)', description: '前職やアルバイト先がある方が対象です。', requiresOriginal: false, pdfAllowed: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'carInsurance', label: '運転免許証・自動車保険証の写し', description: '車で通勤される方が対象です。', requiresOriginal: false, pdfAllowed: false, status: '承認済', submittedAt: '2026-08-19', rejectReason: '', rejectedAt: '' },
+      { key: 'bikeInsurance', label: '自転車保険証の写し', description: '', requiresOriginal: false, pdfAllowed: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'leaseContract', label: '賃貸借契約書の写し', description: '', requiresOriginal: false, pdfAllowed: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' }
+    ];
+
+    function demoPayload() {
+      var applicable = DEMO_DOCS.filter(function (d) { return d.status !== '対象外'; });
+      var done = applicable.filter(function (d) { return d.status !== '未提出'; }).length;
+      return {
+        ok: true, matched: true, needsCommute: false,
+        employee: DEMO_EMPLOYEE, companies: [], commutes: STATE.commutes.length ? STATE.commutes : ['車', '自転車', '電車・バス・徒歩'],
+        docs: DEMO_DOCS, progressPct: applicable.length ? Math.round((done / applicable.length) * 100) : 100,
+        stage: '確認中'
+      };
+    }
+
+    // デモモードでは/api/liffへの通信を行わず、固定データをその場で返す(画面側のロジックは本番と共通)
+    function callServerDemo_(fn, args) {
+      showOverlay();
+      return new Promise(function (resolve) { setTimeout(resolve, 350); }).then(function () {
+        hideOverlay();
+        if (fn === 'getJobTypeOptions') return { jobTypes: DEMO_JOB_TYPES };
+        if (fn === 'identifyAndBind') return { ok: true, matched: true, needsCommute: true, employee: DEMO_EMPLOYEE, companies: [], commutes: ['車', '自転車', '電車・バス・徒歩'], docs: [], progressPct: 0, stage: '未提出' };
+        if (fn === 'saveCommute') {
+          DEMO_EMPLOYEE.commute = args[2];
+          return demoPayload();
+        }
+        if (fn === 'getMyDocuments' || fn === 'liffBind' || fn === 'getMyStatusByLine') return demoPayload();
+        if (fn === 'submitDocument') {
+          var doc = DEMO_DOCS.filter(function (d) { return d.key === args[1]; })[0];
+          if (doc) { doc.status = '確認中'; doc.submittedAt = '(デモ)'; doc.rejectReason = ''; }
+          return demoPayload();
+        }
+        return demoPayload();
+      });
+    }
+
     // /api/liff/:fn へのfetch呼び出し。レスポンスは {ok:true, result} または {ok:false, error}。
     function callServer_(fn, args) {
+      if (DEMO) return callServerDemo_(fn, args);
       showOverlay();
       return fetch('/api/liff/' + fn, {
         method: 'POST',
@@ -246,7 +296,17 @@
     }
 
     function boot() {
-      debugLog('boot() 開始 eid=' + JSON.stringify(EID) + ' mode=' + MODE + ' url=' + location.href);
+      debugLog('boot() 開始 eid=' + JSON.stringify(EID) + ' mode=' + MODE + ' demo=' + DEMO + ' url=' + location.href);
+
+      if (DEMO) {
+        SDK_LOAD_HANDLED_ = true;
+        if (SDK_PRELOAD_WATCHDOG_) { clearTimeout(SDK_PRELOAD_WATCHDOG_); }
+        debugLog('デモモード: LINEログインをスキップし、本人確認フォームから開始します');
+        STATE.lineUserId = 'DEMO_LINE_USER';
+        STATE.displayName = 'デモ太郎';
+        loadIdentityForm_();
+        return;
+      }
 
       fetch('/api/liff/config').then(function (res) { return res.json(); }).then(function (config) {
         var liffId = config.liffId;
