@@ -5,6 +5,7 @@ import * as adminApi from './api/admin';
 import { ApiError as LiffApiError } from './api/liff';
 import { ApiError as AdminApiError } from './api/admin';
 import { getVerifiedAdminEmail } from './auth';
+import { getEmployeeFile } from './r2';
 
 type Variables = { adminEmail: string };
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -107,6 +108,23 @@ const ADMIN_FUNCTIONS: Record<string, (env: Env, email: string, ...args: any[]) 
 };
 
 app.post('/api/admin/:fn', dispatch(ADMIN_FUNCTIONS, AdminApiError, (c) => [c.get('adminEmail')]));
+
+// 提出書類ファイルの表示(JSONディスパッチではなくバイナリを直接返すため専用ルート)
+app.get('/api/admin/file', async (c) => {
+  const email = c.get('adminEmail');
+  const employeeId = c.req.query('employeeId') || '';
+  const docKey = c.req.query('docKey') || '';
+  try {
+    const info = await adminApi.adminGetFileInfo(c.env, email, employeeId, docKey);
+    const obj = await getEmployeeFile(c.env.DOCS, info.key);
+    if (!obj) return c.json({ ok: false, error: 'ファイルが見つかりません' }, 404);
+    return new Response(obj.body, { headers: { 'Content-Type': info.mimeType } });
+  } catch (err) {
+    const message = err instanceof AdminApiError || err instanceof Error ? err.message : String(err);
+    const status = err instanceof AdminApiError ? 400 : 500;
+    return c.json({ ok: false, error: message }, status);
+  }
+});
 
 // マッチしないルートは静的アセット(public/)にフォールバック
 app.notFound((c) => c.env.ASSETS.fetch(c.req.raw));

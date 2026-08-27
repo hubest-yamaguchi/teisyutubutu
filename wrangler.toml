@@ -10,12 +10,18 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "teisyutubutu-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "4e910e40-098e-4ba3-934b-b1fd438c53c1"
 
 [[r2_buckets]]
 binding = "DOCS"
 bucket_name = "teisyutubutu-docs"
 
 [vars]
-# 機微値ではないもののみ。トークン等は `wrangler secret put` で登録する。
-ENVIRONMENT = "development"
+# 機微値ではないもののみ。トークン等はsettingsテーブル(D1)で管理する。
+# ここが実際にdeployされる値(本番)。ローカルの`wrangler dev`だけ.dev.varsで上書きしてdevelopmentにする
+# (X-Debug-Admin-Emailによる認証バイパスはENVIRONMENT=developmentの時だけ有効なため、本番はproductionにしておく)。
+ENVIRONMENT = "production"
+
+# Cloudflare Access(Zero Trust)アプリを作成したら、以下を実際の値に置き換える
+CF_ACCESS_TEAM_DOMAIN = ""
+CF_ACCESS_AUD = ""

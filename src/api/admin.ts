@@ -118,7 +118,8 @@ export async function adminGetEmployeeDetail(env: Env, email: string, employeeId
       rejectReason: s.RejectReason || '',
       rejectedAt: s.RejectedAt || '',
       receivedOriginal: !!s.ReceivedOriginal,
-      restrictedView: isMyNumber && !canViewMyNumberFlag
+      restrictedView: isMyNumber && !canViewMyNumberFlag,
+      hasFile: !!s.StorageKey && !(isMyNumber && !canViewMyNumberFlag)
     };
   });
 
@@ -177,6 +178,20 @@ export async function adminDeleteMyNumber(env: Env, email: string, employeeId: s
   await upsertSubmission(env.DB, employeeId, 'myNumber', { Status: '破棄済み' });
   await appendHistory(env.DB, employeeId, 'myNumber', '削除', 'マイナンバー確認書類を管理者操作により削除', email);
   return adminGetEmployeeDetail(env, email, employeeId);
+}
+
+// 管理画面から提出ファイルを表示するための認可付きファイル情報取得(実体の取得はindex.ts側でR2から行う)
+export async function adminGetFileInfo(env: Env, email: string, employeeId: string, docKey: string) {
+  await requireAdmin(env, email);
+  const employee = await findEmployeeById(env.DB, employeeId);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  if (docKey === 'myNumber' && !(await canViewMyNumber(env.DB, email, employee.Company))) {
+    throw new ApiError('この操作にはマイナンバー閲覧権限が必要です');
+  }
+  const subs = await getSubmissionsMap(env.DB, employeeId);
+  const sub = subs[docKey];
+  if (!sub || !sub.StorageKey) throw new ApiError('ファイルが見つかりません');
+  return { key: sub.StorageKey, mimeType: sub.MimeType || 'application/octet-stream' };
 }
 
 export async function adminListNotifications(env: Env, email: string) {

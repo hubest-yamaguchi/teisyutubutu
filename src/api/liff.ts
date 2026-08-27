@@ -172,13 +172,15 @@ export async function submitDocument(
   if (!isApplicable(meta, employee)) throw new ApiError('この書類は対象外です');
 
   const seq = docTypes.findIndex((d) => d.key === docKey) + 1;
-  await saveEmployeeFile(env.DOCS, employee.EmployeeId, meta.label, seq, base64Data, mimeType, fileExt);
+  const storageKey = await saveEmployeeFile(env.DOCS, employee.EmployeeId, meta.label, seq, base64Data, mimeType, fileExt);
 
   await upsertSubmission(env.DB, eid, docKey, {
     Status: STATUS.REVIEW,
     SubmittedAt: todayStr(),
     RejectReason: '',
-    RejectedAt: ''
+    RejectedAt: '',
+    StorageKey: storageKey,
+    MimeType: mimeType
   });
   await appendHistory(env.DB, eid, docKey, '提出', `${meta.label}を提出`, '');
   await notifyAllAdmins(env.DB, `${employee.Name}さんが「${meta.label}」を提出しました。`);

@@ -176,6 +176,9 @@
           return '<div class="doc-row"><b>' + d.label + '</b> <span class="muted">（マイナンバー閲覧権限が無いため非表示）</span></div>';
         }
         var actions = '';
+        if (d.hasFile) {
+          actions += '<button class="btn ghost" onclick="viewFile(\'' + d.key + '\')">書類を表示</button> ';
+        }
         if (d.status === '確認中') {
           actions += '<button class="btn approve" onclick="approveDoc(\'' + d.key + '\')">承認</button> ';
           actions += '<button class="btn danger" onclick="showRejectBox(\'' + d.key + '\')">差し戻し</button>';
@@ -221,6 +224,18 @@
         alert('送信しました');
         closeDrawer();
         loadDashboard();
+      }).catch(showError);
+    }
+
+    function viewFile(docKey) {
+      var headers = {};
+      if (IS_LOCAL_DEV) headers['X-Debug-Admin-Email'] = localStorage.getItem('devAdminEmail') || '';
+      var url = '/api/admin/file?employeeId=' + encodeURIComponent(CURRENT_DETAIL_ID) + '&docKey=' + encodeURIComponent(docKey);
+      fetch(url, { headers: headers }).then(function (res) {
+        if (!res.ok) return res.json().then(function (e) { throw new Error(e.error || 'ファイルの取得に失敗しました'); });
+        return res.blob();
+      }).then(function (blob) {
+        window.open(URL.createObjectURL(blob), '_blank');
       }).catch(showError);
     }
 

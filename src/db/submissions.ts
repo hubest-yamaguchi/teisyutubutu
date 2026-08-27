@@ -12,6 +12,8 @@ export type Submission = {
   RejectedAt: string;
   ReceivedOriginal: boolean;
   UpdatedAt: string;
+  StorageKey: string;
+  MimeType: string;
 };
 
 type SubmissionRow = Omit<Submission, 'ReceivedOriginal'> & { ReceivedOriginal: number };
@@ -41,7 +43,9 @@ export async function getAllSubmissions(db: D1Database): Promise<Record<string, 
   return byEmployee;
 }
 
-export type SubmissionPatch = Partial<Pick<Submission, 'Status' | 'SubmittedAt' | 'RejectReason' | 'RejectedAt' | 'ReceivedOriginal'>>;
+export type SubmissionPatch = Partial<
+  Pick<Submission, 'Status' | 'SubmittedAt' | 'RejectReason' | 'RejectedAt' | 'ReceivedOriginal' | 'StorageKey' | 'MimeType'>
+>;
 
 // upsertSubmission_ と同じ: 既存行があれば更新、なければ既定値+patchで新規作成。UpdatedAtは常に現在時刻。
 export async function upsertSubmission(db: D1Database, employeeId: string, docKey: string, patch: SubmissionPatch): Promise<Submission> {
@@ -59,6 +63,8 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
     RejectReason: '',
     RejectedAt: '',
     ReceivedOriginal: false,
+    StorageKey: '',
+    MimeType: '',
     ...(existing ?? {}),
     ...patch,
     UpdatedAt: nowStr()
@@ -66,11 +72,12 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
 
   await db
     .prepare(
-      `INSERT INTO submissions (EmployeeId, DocKey, Status, SubmittedAt, RejectReason, RejectedAt, ReceivedOriginal, UpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO submissions (EmployeeId, DocKey, Status, SubmittedAt, RejectReason, RejectedAt, ReceivedOriginal, UpdatedAt, StorageKey, MimeType)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(EmployeeId, DocKey) DO UPDATE SET
          Status=excluded.Status, SubmittedAt=excluded.SubmittedAt, RejectReason=excluded.RejectReason,
-         RejectedAt=excluded.RejectedAt, ReceivedOriginal=excluded.ReceivedOriginal, UpdatedAt=excluded.UpdatedAt`
+         RejectedAt=excluded.RejectedAt, ReceivedOriginal=excluded.ReceivedOriginal, UpdatedAt=excluded.UpdatedAt,
+         StorageKey=excluded.StorageKey, MimeType=excluded.MimeType`
     )
     .bind(
       record.EmployeeId,
@@ -80,7 +87,9 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
       record.RejectReason,
       record.RejectedAt,
       record.ReceivedOriginal ? 1 : 0,
-      record.UpdatedAt
+      record.UpdatedAt,
+      record.StorageKey,
+      record.MimeType
     )
     .run();
 

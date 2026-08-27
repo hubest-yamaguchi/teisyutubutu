@@ -15,6 +15,10 @@ export function employeeFileKey(employeeId: string, seq: number, docLabel: strin
   return `${employeeId}/${seq}_${safeLabel}${ext}`;
 }
 
+export async function getEmployeeFile(bucket: R2Bucket, key: string): Promise<R2ObjectBody | null> {
+  return bucket.get(key);
+}
+
 export async function saveEmployeeFile(
   bucket: R2Bucket,
   employeeId: string,
