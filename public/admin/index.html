@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>入社書類管理システム</title>
+  <style>
+    body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; background:#F2F4F3; color:#1D2321; margin:0; }
+    header { background:#fff; border-bottom:1px solid #DBE1DF; padding:14px 24px; display:flex; justify-content:space-between; align-items:center; }
+    header h1 { font-size:1.05rem; margin:0; }
+    nav { display:flex; gap:8px; }
+    nav button { background:#E7EAF2; color:#3A4E75; border:none; padding:8px 14px; border-radius:999px; font-size:.82rem; font-weight:700; cursor:pointer; }
+    nav button.active { background:#3A4E75; color:#fff; }
+    main { padding:24px; max-width:1100px; margin:0 auto; }
+    .kpi-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:16px; }
+    .kpi { background:#fff; border:1px solid #DBE1DF; border-radius:14px; padding:14px; }
+    .kpi .label { font-size:.72rem; color:#8A9490; }
+    .kpi .value { font-size:1.5rem; font-weight:700; }
+    table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #DBE1DF; border-radius:14px; overflow:hidden; }
+    th, td { text-align:left; padding:10px 14px; border-bottom:1px solid #EEF0F1; font-size:.85rem; }
+    th { background:#E8EBEA; font-size:.7rem; text-transform:uppercase; color:#8A9490; }
+    tr.row:hover { background:#F6F8F7; cursor:pointer; }
+    .pill { display:inline-block; font-size:.72rem; font-weight:700; padding:3px 10px; border-radius:999px; }
+    .st-未提出 { background:#EEF0F1; color:#8B929A; }
+    .st-確認中 { background:#E6EFFB; color:#3B7DD8; }
+    .st-差し戻し { background:#FBEAE8; color:#C1443A; }
+    .st-承認済 { background:#E9F5EA; color:#3F9142; }
+    .st-原本提出待ち { background:#FBF0DD; color:#C4881B; }
+    .st-対象外 { background:transparent; color:#AAB2AE; border:1px dashed #C4CCC9; }
+    .card { background:#fff; border:1px solid #DBE1DF; border-radius:14px; padding:16px; margin-bottom:14px; }
+    select, input[type=text], input[type=email], input[type=date], textarea { width:100%; padding:8px 10px; border:1px solid #DBE1DF; border-radius:8px; font-size:.85rem; box-sizing:border-box; }
+    button.btn { background:#3A4E75; color:#fff; border:none; padding:8px 14px; border-radius:8px; font-size:.82rem; font-weight:700; cursor:pointer; }
+    button.btn.approve { background:#3F9142; }
+    button.btn.danger { background:#C1443A; }
+    button.btn.ghost { background:#E7EAF2; color:#3A4E75; }
+    .doc-row { border:1px solid #DBE1DF; border-radius:10px; padding:10px 12px; margin-bottom:8px; }
+    .muted { color:#8A9490; font-size:.8rem; }
+    .drawer-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; }
+    .drawer { position:fixed; top:0; right:0; bottom:0; width:420px; max-width:92vw; background:#fff; box-shadow:-8px 0 24px rgba(0,0,0,.2); overflow-y:auto; padding:20px; display:none; }
+    .row-flex { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .chip { background:#fff; border:1px solid #DBE1DF; border-radius:999px; padding:4px 10px; font-size:.72rem; cursor:pointer; }
+    label.check { display:inline-flex; align-items:center; gap:4px; font-size:.8rem; color:#4A544F; margin-right:10px; }
+    .devbar { background:#3A2E00; color:#F5D98A; font-size:.72rem; padding:4px 12px; }
+    .devbar input { width:auto; display:inline-block; background:#fff; padding:2px 6px; border-radius:4px; border:none; font-size:.72rem; }
+  </style>
+</head>
+<body>
+  <div class="devbar" id="devbar" style="display:none;">
+    ローカル開発用の認証バイパス中: <input type="text" id="devEmailInput" placeholder="管理者として扱うメールアドレス">
+    <button onclick="saveDevEmail()" style="font-size:.72rem;">設定</button>
+  </div>
+  <header>
+    <h1>入社書類管理システム</h1>
+    <nav id="mainNav"></nav>
+  </header>
+  <main id="main"><p class="muted">読み込み中です…</p></main>
+
+  <div class="drawer-backdrop" id="drawerBackdrop" onclick="closeDrawer()"></div>
+  <div class="drawer" id="drawer"></div>
+
+  <script>
+    var CURRENT_COMPANY_FILTER = 'すべて';
+
+    // 本番はCloudflare AccessがCf-Access-Jwt-Assertionを自動付与するため、ここでは何もしなくてよい。
+    // ローカル開発(wrangler dev)ではAccessが前段に無いため、X-Debug-Admin-Emailで代わりに認証する。
+    var IS_LOCAL_DEV = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
+    if (IS_LOCAL_DEV) {
+      document.getElementById('devbar').style.display = 'block';
+      document.getElementById('devEmailInput').value = localStorage.getItem('devAdminEmail') || '';
+    }
+    function saveDevEmail() {
+      localStorage.setItem('devAdminEmail', document.getElementById('devEmailInput').value.trim());
+      go('dashboard');
+    }
+
+    // input要素のvalue属性に値を埋め込む際、値に " が含まれると属性が途中で閉じてしまうため使う
+    function escAttr(v) {
+      return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    }
+
+    function callServer_(fn, args) {
+      var headers = { 'Content-Type': 'application/json' };
+      if (IS_LOCAL_DEV) headers['X-Debug-Admin-Email'] = localStorage.getItem('devAdminEmail') || '';
+      return fetch('/api/admin/' + fn, { method: 'POST', headers: headers, body: JSON.stringify({ args: args || [] }) })
+        .then(function (res) { return res.json(); })
+        .then(function (res) {
+          if (!res.ok) throw new Error(res.error || 'サーバーエラーが発生しました');
+          return res.result;
+        });
+    }
+
+    function navHtml(active) {
+      var items = [['dashboard', 'ダッシュボード'], ['settings', '設定']];
+      return items.map(function (it) {
+        return '<button class="' + (it[0] === active ? 'active' : '') + '" onclick="go(\'' + it[0] + '\')">' + it[1] + '</button>';
+      }).join('');
+    }
+
+    function go(page) {
+      document.getElementById('mainNav').innerHTML = navHtml(page);
+      if (page === 'dashboard') loadDashboard();
+      if (page === 'settings') loadSettings();
+    }
+
+    function showError(err) {
+      document.getElementById('main').innerHTML = '<div class="card"><p>エラー: ' + (err && err.message ? err.message : err) + '</p></div>';
+    }
+
+    // ---------- ダッシュボード ----------
+    function loadDashboard() {
+      callServer_('adminGetDashboard', [CURRENT_COMPANY_FILTER]).then(renderDashboard).catch(showError);
+    }
+
+    function renderDashboard(data) {
+      var kpiKeys = ['total', '未提出', '確認中', '差し戻し', '原本待ち', '受入準備完了'];
+      var kpiLabels = { total: '全新入社員', '未提出': '未提出', '確認中': '確認中', '差し戻し': '差し戻し中', '原本待ち': '原本提出待ち', '受入準備完了': '受入準備完了' };
+      var kpiHtml = kpiKeys.map(function (k) {
+        return '<div class="kpi"><div class="label">' + kpiLabels[k] + '</div><div class="value">' + (data.kpi[k] || 0) + '</div></div>';
+      }).join('');
+
+      var companyOptions = ['すべて'].concat(data.companies).map(function (c) {
+        return '<option ' + (c === CURRENT_COMPANY_FILTER ? 'selected' : '') + '>' + c + '</option>';
+      }).join('');
+
+      var rowsHtml = data.rows.map(function (r) {
+        return '<tr class="row" onclick="openDetail(\'' + r.id + '\')">' +
+          '<td>' + r.name + '<div class="muted">' + r.kana + '</div></td>' +
+          '<td>' + (r.company || '未回答') + '</td><td>' + (r.commute || '未回答') + '</td><td>' + (r.hireDate || '') + '</td>' +
+          '<td><span class="pill st-' + (r.stage === '原本待ち' ? '原本提出待ち' : r.stage === '受入準備完了' ? '承認済' : r.stage) + '">' + r.stage + '</span></td>' +
+          '<td>' + r.progressPct + '%</td></tr>';
+      }).join('');
+
+      document.getElementById('main').innerHTML =
+        '<div class="kpi-row">' + kpiHtml + '</div>' +
+        '<div class="card"><label class="muted">配属先で絞り込み</label><br>' +
+        '<select id="companyFilter" onchange="onCompanyFilterChange()" style="width:220px;">' + companyOptions + '</select></div>' +
+        '<table><thead><tr><th>氏名</th><th>配属先</th><th>通勤手段</th><th>入社予定日</th><th>ステータス</th><th>進捗</th></tr></thead>' +
+        '<tbody>' + (rowsHtml || '<tr><td colspan="6" class="muted">該当する新入社員がいません</td></tr>') + '</tbody></table>';
+    }
+
+    function onCompanyFilterChange() {
+      CURRENT_COMPANY_FILTER = document.getElementById('companyFilter').value;
+      loadDashboard();
+    }
+
+    // ---------- 詳細ドロワー ----------
+    var CURRENT_DETAIL_ID = null;
+    var TEMPLATES = null;
+
+    function openDetail(employeeId) {
+      CURRENT_DETAIL_ID = employeeId;
+      callServer_('adminGetEmployeeDetail', [employeeId]).then(function (data) {
+        renderDetail(data);
+        document.getElementById('drawerBackdrop').style.display = 'block';
+        document.getElementById('drawer').style.display = 'block';
+      }).catch(showError);
+
+      if (!TEMPLATES) {
+        callServer_('adminGetTemplates', []).then(function (t) { TEMPLATES = t; renderReminderChips(); });
+      }
+    }
+
+    function closeDrawer() {
+      document.getElementById('drawerBackdrop').style.display = 'none';
+      document.getElementById('drawer').style.display = 'none';
+    }
+
+    function renderDetail(data) {
+      var e = data.employee;
+      var docsHtml = data.docs.map(function (d) {
+        if (d.status === '対象外') {
+          return '<div class="doc-row" style="opacity:.5;"><b>' + d.label + '</b> <span class="pill st-対象外">対象外</span></div>';
+        }
+        if (d.restrictedView) {
+          return '<div class="doc-row"><b>' + d.label + '</b> <span class="muted">（マイナンバー閲覧権限が無いため非表示）</span></div>';
+        }
+        var actions = '';
+        if (d.status === '確認中') {
+          actions += '<button class="btn approve" onclick="approveDoc(\'' + d.key + '\')">承認</button> ';
+          actions += '<button class="btn danger" onclick="showRejectBox(\'' + d.key + '\')">差し戻し</button>';
+        } else if (d.status === '原本提出待ち') {
+          actions += '<button class="btn danger" onclick="showRejectBox(\'' + d.key + '\')">差し戻し</button>';
+        }
+        var reasonHtml = d.status === '差し戻し' ? '<div class="muted" style="color:#C1443A;">' + d.rejectReason + '</div>' : '';
+        return '<div class="doc-row"><b>' + d.label + (d.requiresOriginal ? '（原本）' : '') + '</b> ' +
+          '<span class="pill st-' + d.status + '">' + d.status + '</span>' +
+          reasonHtml +
+          '<div style="margin-top:6px;">' + actions + '</div>' +
+          '<div id="rejectBox-' + d.key + '"></div></div>';
+      }).join('');
+
+      document.getElementById('drawer').innerHTML =
+        '<h2>' + e.name + '</h2><p class="muted">' + (e.company || '未回答') + ' ・ ' + (e.commute || '未回答') + ' ・ 入社予定日 ' + (e.hireDate || '未回答') + '</p>' +
+        (!e.company || !e.commute ? '<p class="muted" style="color:#C4881B;">※配属先・通勤手段は本人がLINEで回答するとここに反映されます</p>' : '') +
+        docsHtml +
+        '<hr><h3>リマインダー送信</h3>' +
+        '<div class="row-flex" id="reminderTpl"></div>' +
+        '<textarea id="reminderText" rows="3" placeholder="送信内容"></textarea>' +
+        '<div style="height:8px;"></div><button class="btn" onclick="sendReminder()">LINEで送信</button>';
+
+      if (TEMPLATES) renderReminderChips();
+    }
+
+    function renderReminderChips() {
+      var el = document.getElementById('reminderTpl');
+      if (!el || !TEMPLATES) return;
+      el.innerHTML = TEMPLATES.reminderTemplates.map(function (t, i) {
+        return '<span class="chip" onclick="pickReminderTpl(' + i + ')">' + t.title + '</span>';
+      }).join('');
+    }
+
+    function pickReminderTpl(i) {
+      document.getElementById('reminderText').value = TEMPLATES.reminderTemplates[i].text;
+    }
+
+    function sendReminder() {
+      var text = document.getElementById('reminderText').value.trim();
+      if (!text) return;
+      callServer_('adminSendReminder', [CURRENT_DETAIL_ID, text]).then(function () {
+        alert('送信しました');
+        closeDrawer();
+        loadDashboard();
+      }).catch(showError);
+    }
+
+    function approveDoc(docKey) {
+      callServer_('adminApproveDoc', [CURRENT_DETAIL_ID, docKey]).then(function (data) { renderDetail(data); loadDashboard(); }).catch(showError);
+    }
+
+    function showRejectBox(docKey) {
+      var box = document.getElementById('rejectBox-' + docKey);
+      var chips = TEMPLATES ? TEMPLATES.rejectTemplates.map(function (t, i) {
+        return '<span class="chip" onclick="document.getElementById(\'rejectText-' + docKey + '\').value=' + JSON.stringify(t.text).replace(/"/g, '&quot;') + '">' + t.title + '</span>';
+      }).join('') : '';
+      box.innerHTML = '<div class="row-flex" style="margin-top:6px;">' + chips + '</div>' +
+        '<textarea id="rejectText-' + docKey + '" rows="2" placeholder="差し戻し理由"></textarea>' +
+        '<div style="height:6px;"></div><button class="btn danger" onclick="sendReject(\'' + docKey + '\')">差し戻しを送信</button>';
+    }
+
+    function sendReject(docKey) {
+      var text = document.getElementById('rejectText-' + docKey).value.trim();
+      if (!text) return;
+      callServer_('adminRejectDoc', [CURRENT_DETAIL_ID, docKey, text]).then(function (data) { renderDetail(data); loadDashboard(); }).catch(showError);
+    }
+
+    // ---------- 設定ページ ----------
+    function loadSettings() {
+      callServer_('settingsGet', []).then(renderSettings).catch(showError);
+    }
+
+    function renderSettings(s) {
+      window.__lastSettings = s;
+      var adminsHtml = s.admins.map(function (a) {
+        var myNum = (a.MyNumberCompanies || []).join('、');
+        return '<tr><td>' + a.Name + '</td><td>' + a.Email + '</td><td>' + a.Company + '</td>' +
+          '<td>' + (a.IsSuperAdmin ? '代表管理者' : 'HR管理者') + '</td>' +
+          '<td>' + (myNum || '-') + '</td>' +
+          '<td><button class="btn ghost" onclick="removeAdmin(\'' + a.AdminId + '\')">削除</button></td></tr>';
+      }).join('');
+
+      function templateListHtml(list, type) {
+        return (list.length ? list.map(function (t) {
+          return '<div class="doc-row"><b>' + t.title + '</b>' +
+            '<button class="btn ghost" style="float:right;" onclick="removeTemplate(\'' + t.id + '\')">削除</button>' +
+            '<div class="muted" style="margin-top:4px;">' + t.text + '</div></div>';
+        }).join('') : '<p class="muted">まだ登録されていません</p>') +
+        '<div class="row-flex" style="margin-top:8px;">' +
+        '<input type="text" id="newTpl-' + type + '-title" placeholder="タイトル（例: 画像が不鮮明）" style="width:220px;">' +
+        '</div>' +
+        '<textarea id="newTpl-' + type + '-text" rows="2" placeholder="本文" style="margin-top:6px;"></textarea>' +
+        '<div style="height:6px;"></div><button class="btn ghost" onclick="addTemplate(\'' + type + '\')">追加</button>';
+      }
+
+      var html = '';
+
+      // ① 学生（新入社員）登録：最も利用頻度が高いため先頭に配置。全HR管理者が利用可
+      html +=
+        '<div class="card"><h2>学生（新入社員）の登録</h2>' +
+        '<p class="muted">内定者全員に、LIFF画面のURLをお伝えください（LINEアプリで開いてもらいます。全員共通のURLです）。</p>' +
+        '<h3 style="font-size:.9rem;">1人ずつ登録</h3>' +
+        '<p class="muted">通勤手段は本人が書類提出前に回答するため、ここでは入力不要です。職種は本人確認と配属先の自動決定に使うため必須です（下記「職種法人マスタ」の職種名と完全に一致させてください）。</p>' +
+        '<div class="row-flex"><input type="text" id="newEmpName" placeholder="氏名" style="width:120px;">' +
+        '<input type="text" id="newEmpKana" placeholder="フリガナ" style="width:120px;">' +
+        '<select id="newEmpJobType" style="width:160px;">' +
+        '<option value="">職種を選択</option>' +
+        Object.keys(s.jobTypeCompanyMap).map(function (j) { return '<option value="' + escAttr(j) + '">' + j + '</option>'; }).join('') +
+        '</select></div>' +
+        '<div style="height:8px;"></div><button class="btn" onclick="addEmployee()">登録する</button>' +
+        '<div id="empResult" class="muted" style="margin-top:8px;"></div>' +
+        '<hr style="margin:16px 0;border:none;border-top:1px solid #EEF0F1;">' +
+        '<h3 style="font-size:.9rem;">CSV／Excelから一括登録</h3>' +
+        '<p class="muted">列名：氏名・フリガナ・職種（1行目は見出し。フリガナは省略可、職種は必須）</p>' +
+        '<input type="file" id="bulkEmpFile" accept=".csv,.xlsx,.xls">' +
+        '<div style="height:8px;"></div><button class="btn" onclick="bulkAddEmployees()">ファイルから一括登録</button>' +
+        '<div id="bulkEmpResult" class="muted" style="margin-top:8px;"></div>' +
+        '<hr style="margin:16px 0;border:none;border-top:1px solid #EEF0F1;">' +
+        '<h3 style="font-size:.9rem;">入社予定日の一括設定</h3>' +
+        '<p class="muted">全員が同じ入社予定日になる場合、ここでまとめて設定できます（登録済みの全員に上書きされます）。</p>' +
+        '<div class="row-flex"><input type="date" id="bulkHireDate" style="width:160px;">' +
+        '<button class="btn ghost" onclick="bulkSetHireDate()">全員に一括設定</button></div>' +
+        '<div id="bulkHireDateResult" class="muted" style="margin-top:8px;"></div>' +
+        '</div>';
+
+      // ② テンプレート編集：全HR管理者が利用可
+      html +=
+        '<div class="card"><h2>差し戻し・リマインダーのテンプレート</h2>' +
+        '<h3 style="font-size:.9rem;">差し戻し理由</h3>' + templateListHtml(s.rejectTemplates, 'reject') +
+        '<hr style="margin:16px 0;border:none;border-top:1px solid #EEF0F1;">' +
+        '<h3 style="font-size:.9rem;">リマインダー文言</h3>' + templateListHtml(s.reminderTemplates, 'reminder') +
+        '</div>';
+
+      // ③ 職種法人マスタ：全HR管理者が編集可(旧: スプレッドシート直接編集)
+      html +=
+        '<div class="card"><h2>職種法人マスタ</h2>' +
+        '<p class="muted">職種と配属先法人の対応表。新入社員の「職種」入力・本人確認と完全に一致させてください。</p>' +
+        '<table><thead><tr><th>職種</th><th>配属先法人</th><th></th></tr></thead><tbody>' +
+        Object.keys(s.jobTypeCompanyMap).map(function (jt) {
+          return '<tr><td>' + jt + '</td><td>' + s.jobTypeCompanyMap[jt] + '</td>' +
+            '<td><button class="btn ghost" onclick="removeJobType(\'' + escAttr(jt) + '\')">削除</button></td></tr>';
+        }).join('') +
+        '</tbody></table>' +
+        '<div style="height:8px;"></div>' +
+        '<div class="row-flex"><input type="text" id="newJobType" placeholder="職種名" style="width:160px;">' +
+        '<select id="newJobTypeCompany" style="width:200px;">' + s.companies.map(function (c) { return '<option>' + c + '</option>'; }).join('') + '</select>' +
+        '<button class="btn ghost" onclick="addJobType()">追加</button></div></div>';
+
+      if (s.isSuperAdmin) {
+        // ④ 管理者一覧：代表管理者のみ
+        html +=
+          '<div class="card"><h2>管理者一覧（LINE個別通知用）</h2>' +
+          '<table><thead><tr><th>氏名</th><th>メール</th><th>担当法人</th><th>権限</th><th>マイナンバー閲覧</th><th></th></tr></thead><tbody>' + adminsHtml + '</tbody></table>' +
+          '<div style="height:10px;"></div>' +
+          '<div class="row-flex"><input type="text" id="newAdminName" placeholder="氏名" style="width:120px;">' +
+          '<input type="email" id="newAdminEmail" placeholder="メール(Cloudflare Accessのログインと同じもの)" style="width:260px;">' +
+          '<input type="text" id="newAdminCompany" placeholder="担当法人(任意)" style="width:140px;">' +
+          '<input type="text" id="newAdminLineId" placeholder="LINEユーザーID(任意)" style="width:200px;"></div>' +
+          '<div class="row-flex" style="margin-top:6px;">' +
+          '<label class="check"><input type="checkbox" id="newAdminSuper"> 代表管理者にする</label>' +
+          s.companies.map(function (c) {
+            return '<label class="check"><input type="checkbox" class="mynum-chk" value="' + escAttr(c) + '"> ' + c + 'のマイナンバー閲覧</label>';
+          }).join('') +
+          '</div>' +
+          '<div style="height:8px;"></div><button class="btn" onclick="addAdmin()">追加</button></div>';
+
+        // ⑤ API設定：代表管理者のみ
+        html +=
+          '<div class="card"><h2>LINE公式アカウント設定</h2>' +
+          '<label class="muted">チャネルID（LIFF用）</label>' +
+          '<input type="text" id="liffChannelId" value="' + escAttr(s.liffChannelId) + '">' +
+          '<div style="height:8px;"></div>' +
+          '<label class="muted">チャネルアクセストークン（現在: ' + s.lineChannelAccessTokenMasked + '）</label>' +
+          '<input type="text" id="lineToken" placeholder="新しいトークンを入力（変更する場合のみ）">' +
+          '<div style="height:8px;"></div><button class="btn" onclick="saveLineChannel()">保存</button></div>' +
+
+          '<div class="card"><h2>通知の送信方式</h2>' +
+          '<p class="muted">現在の方式: ' + (s.notifyProvider === 'liny' ? 'Liny HR経由' : 'LINE公式アカウントを直接使う') + '</p>' +
+          '<div class="row-flex">' +
+          '<button class="btn ' + (s.notifyProvider === 'line' ? '' : 'ghost') + '" onclick="setNotifyProvider(\'line\')">LINE公式アカウントを直接使う</button>' +
+          '<button class="btn ' + (s.notifyProvider === 'liny' ? '' : 'ghost') + '" onclick="setNotifyProvider(\'liny\')">Liny HR経由で送る</button>' +
+          '</div></div>' +
+
+          '<div class="card"><h2>Liny HR連携</h2>' +
+          '<p class="muted">Liny HR側の正式なAPI仕様（エンドポイント・認証方式）が確認でき次第、実際に送信されるようになります。現時点では入力・保存はできますが、送信は行われず「保留中」として記録されます。</p>' +
+          '<label class="muted">APIキー（現在: ' + s.linyApiKeyMasked + '）</label>' +
+          '<input type="text" id="linyApiKey" placeholder="新しいAPIキーを入力（変更する場合のみ）">' +
+          '<div style="height:8px;"></div>' +
+          '<label class="muted">エンドポイントURL（分かれば入力。空欄可）</label>' +
+          '<input type="text" id="linyEndpoint" value="' + (s.linyEndpoint || '') + '" placeholder="例: https://api.liny.jp/...（未確認）">' +
+          '<div style="height:8px;"></div><button class="btn" onclick="saveLiny()">保存</button></div>';
+
+        // ⑥ 書類マスタ：代表管理者のみ(旧: スプレッドシート直接編集)
+        html +=
+          '<div class="card"><h2>書類マスタ</h2>' +
+          '<p class="muted">提出してもらう書類の一覧。書類キーは一度使うと変更しないでください（提出済みデータと紐付いています）。</p>' +
+          s.docTypes.map(function (d, i) {
+            var cond = d.condition ? d.condition.type : '';
+            var condVal = d.condition ? d.condition.value : '';
+            return '<div class="doc-row">' +
+              '<div class="row-flex"><b style="width:100%;">' + d.label + '</b></div>' +
+              '<div class="row-flex" style="margin-top:6px;">' +
+              '<label class="check"><input type="checkbox" ' + (d.requiresOriginal ? 'checked' : '') + ' id="doc-' + i + '-req"> 原本必要</label>' +
+              '<label class="check"><input type="checkbox" ' + (d.pdfAllowed ? 'checked' : '') + ' id="doc-' + i + '-pdf"> PDF可</label>' +
+              '<label class="check"><input type="checkbox" ' + (d.sensitive ? 'checked' : '') + ' id="doc-' + i + '-sens"> 機微情報</label>' +
+              '</div>' +
+              '<div class="row-flex" style="margin-top:6px;">' +
+              '<select id="doc-' + i + '-condtype" style="width:140px;">' +
+              '<option value=""' + (cond === '' ? ' selected' : '') + '>条件なし(全員)</option>' +
+              '<option value="commute"' + (cond === 'commute' ? ' selected' : '') + '>通勤手段</option>' +
+              '<option value="company"' + (cond === 'company' ? ' selected' : '') + '>配属先</option>' +
+              '</select>' +
+              '<input type="text" id="doc-' + i + '-condval" value="' + escAttr(condVal) + '" placeholder="条件の値(車/自転車/会社名など)" style="width:200px;">' +
+              '</div>' +
+              '<textarea id="doc-' + i + '-desc" rows="2" style="margin-top:6px;" placeholder="説明文">' + (d.description || '') + '</textarea>' +
+              '<div style="height:6px;"></div>' +
+              '<button class="btn ghost" onclick="saveDocConfig(' + i + ')">保存</button> ' +
+              '<button class="btn danger" onclick="removeDocConfig(\'' + escAttr(d.key) + '\')">削除</button>' +
+              '<span class="muted" style="margin-left:8px;">key: ' + d.key + '</span>' +
+              '</div>';
+          }).join('') +
+          '<hr style="margin:16px 0;border:none;border-top:1px solid #EEF0F1;">' +
+          '<h3 style="font-size:.9rem;">新しい書類を追加</h3>' +
+          '<div class="row-flex"><input type="text" id="newDocKey" placeholder="キー(半角英字、一意)" style="width:160px;">' +
+          '<input type="text" id="newDocLabel" placeholder="書類名" style="width:200px;"></div>' +
+          '<div style="height:6px;"></div><button class="btn ghost" onclick="addDocConfig()">追加</button></div>';
+
+        // ⑦ 初期セットアップ
+        html +=
+          '<div class="card"><h2>初期データ投入</h2>' +
+          '<p class="muted">書類マスタ・テンプレートが空の場合に初期値を投入します（既にデータがある場合は何もしません。何度実行しても安全です）。</p>' +
+          '<button class="btn" onclick="runSetup()">初期データを投入</button>' +
+          '</div>';
+      }
+
+      document.getElementById('main').innerHTML = html;
+    }
+
+    function runSetup() {
+      callServer_('settingsRunSetup', []).then(function () { alert('完了しました'); loadSettings(); }).catch(showError);
+    }
+
+    function saveLineChannel() {
+      callServer_('settingsSaveLineChannel', [document.getElementById('liffChannelId').value.trim(), document.getElementById('lineToken').value.trim()])
+        .then(renderSettings).catch(showError);
+    }
+
+    function setNotifyProvider(provider) {
+      callServer_('settingsSaveNotifyProvider', [provider]).then(renderSettings).catch(showError);
+    }
+
+    function saveLiny() {
+      callServer_('settingsSaveLiny', [document.getElementById('linyApiKey').value.trim(), document.getElementById('linyEndpoint').value.trim()])
+        .then(renderSettings).catch(showError);
+    }
+
+    function addAdmin() {
+      var myNumberCompanies = Array.prototype.slice.call(document.querySelectorAll('.mynum-chk:checked')).map(function (el) { return el.value; });
+      callServer_('settingsAddAdmin', [
+        document.getElementById('newAdminName').value.trim(),
+        document.getElementById('newAdminEmail').value.trim(),
+        document.getElementById('newAdminCompany').value.trim(),
+        document.getElementById('newAdminLineId').value.trim(),
+        document.getElementById('newAdminSuper').checked,
+        myNumberCompanies
+      ]).then(renderSettings).catch(showError);
+    }
+
+    function removeAdmin(id) {
+      callServer_('settingsRemoveAdmin', [id]).then(renderSettings).catch(showError);
+    }
+
+    function addEmployee() {
+      callServer_('settingsAddEmployee', [
+        document.getElementById('newEmpName').value.trim(),
+        document.getElementById('newEmpKana').value.trim(),
+        document.getElementById('newEmpJobType').value
+      ]).then(function (res) {
+        document.getElementById('empResult').textContent = '登録しました（ID: ' + res.employeeId + '）。上記のURLを本人にお伝えください。';
+        document.getElementById('newEmpName').value = '';
+        document.getElementById('newEmpKana').value = '';
+        document.getElementById('newEmpJobType').value = '';
+      }).catch(showError);
+    }
+
+    function bulkSetHireDate() {
+      var date = document.getElementById('bulkHireDate').value;
+      var resultEl = document.getElementById('bulkHireDateResult');
+      if (!date) { resultEl.textContent = '入社予定日を入力してください'; return; }
+      resultEl.textContent = '設定中…';
+      callServer_('settingsBulkSetHireDate', [date]).then(function (res) {
+        resultEl.textContent = res.updated + '件に設定しました。';
+      }).catch(showError);
+    }
+
+    // 一括登録ボタンを押したときに初めてExcel/CSV読み込みライブラリを読み込む
+    var SHEETJS_LOADING = null;
+    function ensureSheetJs() {
+      if (window.XLSX) return Promise.resolve();
+      if (SHEETJS_LOADING) return SHEETJS_LOADING;
+      SHEETJS_LOADING = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+        s.onload = resolve;
+        s.onerror = function () { SHEETJS_LOADING = null; reject(new Error('読み込みライブラリの取得に失敗しました')); };
+        document.head.appendChild(s);
+      });
+      return SHEETJS_LOADING;
+    }
+
+    function bulkAddEmployees() {
+      var input = document.getElementById('bulkEmpFile');
+      var file = input.files[0];
+      var resultEl = document.getElementById('bulkEmpResult');
+      if (!file) { resultEl.textContent = 'ファイルを選択してください'; return; }
+      resultEl.textContent = '読み込み中…';
+      ensureSheetJs().then(function () { parseAndSendBulk_(file, resultEl); })
+        .catch(function (err) { resultEl.textContent = String(err && err.message || err); });
+    }
+
+    function parseAndSendBulk_(file, resultEl) {
+      var reader = new FileReader();
+      reader.onload = function (e) {
+        try {
+          var data = new Uint8Array(e.target.result);
+          var workbook = XLSX.read(data, { type: 'array', cellDates: true });
+          var firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          var rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+          if (!rows.length) { resultEl.textContent = 'データ行が見つかりませんでした'; return; }
+          callServer_('settingsBulkAddEmployees', [rows]).then(function (res) {
+            var msg = res.added.length + '件登録しました。';
+            if (res.errors.length) {
+              msg += ' エラー ' + res.errors.length + '件：' + res.errors.map(function (er) { return er.row + '行目: ' + er.reason; }).join(' / ');
+            }
+            resultEl.textContent = msg;
+          }).catch(showError);
+        } catch (err) {
+          resultEl.textContent = 'ファイルの読み込みに失敗しました: ' + err;
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function addTemplate(type) {
+      var title = document.getElementById('newTpl-' + type + '-title').value.trim();
+      var text = document.getElementById('newTpl-' + type + '-text').value.trim();
+      if (!title || !text) return;
+      callServer_('settingsAddTemplate', [type, title, text]).then(renderSettings).catch(showError);
+    }
+
+    function removeTemplate(id) {
+      callServer_('settingsRemoveTemplate', [id]).then(renderSettings).catch(showError);
+    }
+
+    function addJobType() {
+      var jobType = document.getElementById('newJobType').value.trim();
+      var company = document.getElementById('newJobTypeCompany').value;
+      if (!jobType) return;
+      callServer_('settingsSaveJobType', [jobType, company]).then(renderSettings).catch(showError);
+    }
+
+    function removeJobType(jobType) {
+      callServer_('settingsRemoveJobType', [jobType]).then(renderSettings).catch(showError);
+    }
+
+    function saveDocConfig(i) {
+      var s = window.__lastSettings;
+      var d = s.docTypes[i];
+      var condType = document.getElementById('doc-' + i + '-condtype').value;
+      var condVal = document.getElementById('doc-' + i + '-condval').value.trim();
+      var doc = {
+        key: d.key,
+        label: d.label,
+        requiresOriginal: document.getElementById('doc-' + i + '-req').checked,
+        pdfAllowed: document.getElementById('doc-' + i + '-pdf').checked,
+        sensitive: document.getElementById('doc-' + i + '-sens').checked,
+        description: document.getElementById('doc-' + i + '-desc').value,
+        condition: condType && condVal ? { type: condType, value: condVal } : undefined
+      };
+      callServer_('settingsSaveDocConfig', [doc, i]).then(renderSettings).catch(showError);
+    }
+
+    function removeDocConfig(key) {
+      if (!confirm('この書類を削除しますか？(提出済みの記録は残ります)')) return;
+      callServer_('settingsRemoveDocConfig', [key]).then(renderSettings).catch(showError);
+    }
+
+    function addDocConfig() {
+      var key = document.getElementById('newDocKey').value.trim();
+      var label = document.getElementById('newDocLabel').value.trim();
+      if (!key || !label) return;
+      var s = window.__lastSettings;
+      callServer_('settingsSaveDocConfig', [{ key: key, label: label }, s.docTypes.length]).then(renderSettings).catch(showError);
+    }
+
+    go('dashboard');
+  </script>
+</body>
+</html>

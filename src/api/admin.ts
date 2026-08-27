@@ -3,7 +3,7 @@
 // admins テーブル(db/admins.ts)で認可判定する(GroupsApp判定は廃止)。
 
 import type { Env } from '../bindings';
-import { COMMUTES, computeStage, progressPct, isApplicable, STATUS, DocType } from '../model';
+import { COMMUTES, COMPANIES, computeStage, progressPct, isApplicable, STATUS, DocType } from '../model';
 import {
   findEmployeeById,
   listEmployees,
@@ -218,7 +218,9 @@ export async function settingsGet(env: Env, email: string) {
     rejectTemplates: await listTemplates(env.DB, 'reject'),
     reminderTemplates: await listTemplates(env.DB, 'reminder'),
     jobTypeCompanyMap: await getJobTypeCompanyMap(env.DB),
-    docTypes: await loadDocTypes(env.DB)
+    docTypes: await loadDocTypes(env.DB),
+    companies: COMPANIES,
+    commutes: COMMUTES
   };
 }
 
