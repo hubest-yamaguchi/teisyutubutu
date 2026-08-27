@@ -1,0 +1,21 @@
+name = "teisyutubutu"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "teisyutubutu-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "DOCS"
+bucket_name = "teisyutubutu-docs"
+
+[vars]
+# 機微値ではないもののみ。トークン等は `wrangler secret put` で登録する。
+ENVIRONMENT = "development"

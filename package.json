@@ -1,0 +1,28 @@
+{
+  "name": "teisyutubutu",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply teisyutubutu-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply teisyutubutu-db --remote"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260827.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.126.0"
+  },
+  "dependencies": {
+    "hono": "^4.13.5",
+    "jose": "^6.2.10"
+  }
+}
