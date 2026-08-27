@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>入社書類提出</title>
+  <script>
+    // 診断ログ: LINEログインは途中でページ全体がLINE側に一度遷移するため、通常のJS変数は
+    // 戻ってきた時点で消えてしまう。sessionStorageに書くことで、遷移の前後を1本の時系列として
+    // 画面に表示できるようにする(DevToolsが使えないスマホでもスクリーンショット1枚で状況を追えるようにするため)。
+    var DEBUG_LOG_KEY_ = 'onboardingLiffDebugLog';
+    function debugLog(msg) {
+      var list = [];
+      try { list = JSON.parse(sessionStorage.getItem(DEBUG_LOG_KEY_) || '[]'); } catch (e) { list = []; }
+      var time = new Date().toLocaleTimeString('ja-JP', { hour12: false }) + '.' + new Date().getMilliseconds();
+      list.push(time + '  ' + msg);
+      try { sessionStorage.setItem(DEBUG_LOG_KEY_, JSON.stringify(list)); } catch (e) { /* 保存領域の上限などは無視 */ }
+      renderDebugLog(list);
+    }
+    function renderDebugLog(list) {
+      var el = document.getElementById('debugLogText');
+      if (!el) return;
+      if (!list) {
+        try { list = JSON.parse(sessionStorage.getItem(DEBUG_LOG_KEY_) || '[]'); } catch (e) { list = []; }
+      }
+      el.textContent = list.join('\n');
+      el.scrollTop = el.scrollHeight;
+    }
+    function clearDebugLog() {
+      try { sessionStorage.removeItem(DEBUG_LOG_KEY_); } catch (e) { /* noop */ }
+      renderDebugLog([]);
+    }
+    window.onerror = function (message, source, lineno, colno) {
+      debugLog('window.onerror: ' + message + ' (' + source + ':' + lineno + ')');
+    };
+    debugLog('--- ページ読み込み開始 ---');
+
+    var SDK_LOAD_HANDLED_ = false;
+    var SDK_PRELOAD_WATCHDOG_ = setTimeout(handleSdkLoadFailure, 10000);
+    function handleSdkLoadFailure() {
+      if (SDK_LOAD_HANDLED_) return;
+      SDK_LOAD_HANDLED_ = true;
+      debugLog('sdk.jsの読み込みが失敗/タイムアウトしました');
+      var html =
+        '<div class="card"><p>LINEの機能の読み込みに失敗しました。</p>' +
+        '<p class="muted">通信状況が不安定な可能性があります。Wi-Fiをオフにしてモバイル通信で開く、または電波の良い場所で再度お試しください。</p>' +
+        '<div style="height:8px;"></div><button onclick="location.reload()">再読み込みする</button></div>';
+      (function apply() {
+        var app = document.getElementById('app');
+        if (app) { app.innerHTML = html; return; }
+        if (document.body) { document.body.innerHTML = '<div id="app">' + html + '</div>'; return; }
+        setTimeout(apply, 50);
+      })();
+    }
+  </script>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js" onerror="handleSdkLoadFailure()"></script>
+  <style>
+    body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; background:#F2F4F3; color:#1D2321; margin:0; padding:16px; }
+    .card { background:#fff; border:1px solid #DBE1DF; border-radius:14px; padding:16px; margin-bottom:12px; }
+    h2 { font-size:1.05rem; margin:0 0 8px; }
+    .pill { display:inline-block; font-size:.72rem; font-weight:700; padding:3px 10px; border-radius:999px; }
+    .st-未提出 { background:#EEF0F1; color:#8B929A; }
+    .st-確認中 { background:#E6EFFB; color:#3B7DD8; }
+    .st-差し戻し { background:#FBEAE8; color:#C1443A; }
+    .st-承認済 { background:#E9F5EA; color:#3F9142; }
+    .st-原本提出待ち { background:#FBF0DD; color:#C4881B; }
+    .st-対象外 { background:transparent; color:#AAB2AE; border:1px dashed #C4CCC9; }
+    .doc-row { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid #EEF0F1; cursor:pointer; }
+    .doc-row.na { opacity:.5; cursor:default; }
+    .doc-row:last-child { border-bottom:none; }
+    button { background:#16867C; color:#fff; border:none; border-radius:10px; padding:12px 16px; font-size:.9rem; font-weight:700; width:100%; cursor:pointer; }
+    button.ghost { background:#E4F1EE; color:#16867C; }
+    .reason { background:#FBEAE8; color:#C1443A; border-radius:8px; padding:10px; font-size:.82rem; margin:8px 0; }
+    .hidden { display:none; }
+    .muted { color:#8A9490; font-size:.82rem; }
+    input[type=file] { width:100%; }
+    .spinner-inline { width:20px; height:20px; border-radius:50%; border:3px solid #DCE6E4; border-top-color:#16867C; animation:spin .8s linear infinite; flex:none; }
+    .overlay { position:fixed; inset:0; background:rgba(29,35,33,.55); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; z-index:999; opacity:0; pointer-events:none; transition:opacity .2s ease; }
+    .overlay.is-active { opacity:1; pointer-events:auto; }
+    .overlay-spinner { width:36px; height:36px; border-radius:50%; border:3px solid rgba(255,255,255,.35); border-top-color:#fff; animation:spin .8s linear infinite; }
+    .overlay-text { color:#fff; font-size:.85rem; font-weight:700; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .spinner-inline, .overlay-spinner { animation-duration:.001ms; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="card" style="display:flex; align-items:center; justify-content:center; gap:10px; padding:24px 16px;">
+      <div class="spinner-inline"></div><p class="muted" style="margin:0;">読み込んでいます…</p>
+    </div>
+  </div>
+
+  <div class="overlay" id="processingOverlay">
+    <div class="overlay-spinner"></div>
+    <div class="overlay-text">処理しています…</div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <span class="muted" style="font-weight:700;">診断ログ(調査用・スクリーンショットで共有してください)</span>
+      <button class="ghost" style="width:auto; padding:4px 10px; font-size:.72rem;" onclick="clearDebugLog()">クリア</button>
+    </div>
+    <pre id="debugLogText" style="white-space:pre-wrap; word-break:break-all; font-size:.68rem; background:#F7F8F8; border:1px solid #DBE1DF; border-radius:8px; padding:8px; max-height:280px; overflow:auto; margin-top:6px;"></pre>
+  </div>
+
+  <script>
+    renderDebugLog();
+    debugLog('bodyスクリプト実行開始');
+
+    // GAS版はサーバー側テンプレート(HtmlTemplate)でliffId/eid/modeを埋め込んでいたが、
+    // Cloudflare版は静的ファイルなので、URLのクエリパラメータとAPIから取得する。
+    var params = new URLSearchParams(location.search);
+    var EID = params.get('eid') || '';
+    var MODE = params.get('mode') === 'whoami' ? 'whoami' : 'normal';
+
+    function showOverlay() {
+      var el = document.getElementById('processingOverlay');
+      if (el) el.classList.add('is-active');
+    }
+    function hideOverlay() {
+      var el = document.getElementById('processingOverlay');
+      if (el) el.classList.remove('is-active');
+    }
+
+    // /api/liff/:fn へのfetch呼び出し。レスポンスは {ok:true, result} または {ok:false, error}。
+    function callServer_(fn, args) {
+      showOverlay();
+      return fetch('/api/liff/' + fn, {
+        method: 'POST',
+        body: JSON.stringify({ args: args || [] })
+      }).then(function (res) {
+        return res.json();
+      }).then(function (res) {
+        hideOverlay();
+        if (!res.ok) throw new Error(res.error || 'サーバーエラーが発生しました');
+        return res.result;
+      }).catch(function (err) {
+        hideOverlay();
+        throw err;
+      });
+    }
+
+    var STATE = { employee: null, docs: [], currentDocKey: null, lineUserId: null, displayName: '', companies: [], commutes: [] };
+
+    var BOOT_WATCHDOG_ = null;
+    function render(html) {
+      if (BOOT_WATCHDOG_) { clearTimeout(BOOT_WATCHDOG_); BOOT_WATCHDOG_ = null; }
+      document.getElementById('app').innerHTML = html;
+    }
+
+    // 共通URL(?eidなし)を初めて開いた人向け：フリガナ・職種を入力して自分の記録を特定してもらう
+    function renderIdentityForm(jobTypes, errorMessage) {
+      var opts = '<option value="">選択してください</option>' + (jobTypes || []).map(function (v) {
+        return '<option value="' + v + '">' + v + '</option>';
+      }).join('');
+      render(
+        '<div class="card"><h2>はじめに本人確認をお願いします</h2>' +
+        '<p class="muted">人事から伝えられているフリガナ・職種を入力してください。</p>' +
+        (errorMessage ? '<div class="reason">' + errorMessage + '</div>' : '') +
+        '<label class="muted">フリガナ（カタカナ）</label>' +
+        '<input type="text" id="idKana" style="width:100%;padding:10px;border:1px solid #DBE1DF;border-radius:8px;font-size:.9rem;margin:4px 0 12px;box-sizing:border-box;">' +
+        '<label class="muted">職種</label>' +
+        '<select id="idJobType" style="width:100%;padding:10px;border:1px solid #DBE1DF;border-radius:8px;font-size:.9rem;margin:4px 0 12px;">' + opts + '</select>' +
+        '<button onclick="submitIdentity()">確認して進む</button>' +
+        '<p id="idStatus" class="muted" style="margin-top:8px;"></p></div>'
+      );
+    }
+
+    function loadIdentityForm_(errorMessage) {
+      callServer_('getJobTypeOptions', []).then(function (res) {
+        renderIdentityForm(res.jobTypes, errorMessage);
+      }).catch(showError);
+    }
+
+    function submitIdentity() {
+      var kana = document.getElementById('idKana').value.trim();
+      var jobType = document.getElementById('idJobType').value;
+      var st = document.getElementById('idStatus');
+      if (!kana || !jobType) { st.textContent = 'フリガナと職種を入力してください'; return; }
+      st.textContent = '確認中…';
+      callServer_('identifyAndBind', [kana, jobType, STATE.lineUserId, STATE.displayName]).then(function (res) {
+        applyPayload(res);
+      }).catch(function (err) {
+        loadIdentityForm_(err && err.message ? err.message : String(err));
+      });
+    }
+
+    // 初回(または変更時)に本人が回答する：通勤手段(書類提出に必要な条件のため、書類一覧の前に確認する)
+    function renderCommuteForm(res) {
+      var e = (res && res.employee) || STATE.employee || {};
+      var opts = '<option value="">選択してください</option>' + STATE.commutes.map(function (v) {
+        return '<option value="' + v + '"' + (v === e.commute ? ' selected' : '') + '>' + v + '</option>';
+      }).join('');
+      render(
+        '<div class="card"><h2>' + (e.name || '') + 'さん、通勤手段を教えてください</h2>' +
+        '<p class="muted">回答内容によって、提出していただく書類が決まります。</p>' +
+        '<label class="muted">通勤手段</label>' +
+        '<select id="cfCommute" style="width:100%;padding:10px;border:1px solid #DBE1DF;border-radius:8px;font-size:.9rem;margin:4px 0 12px;">' + opts + '</select>' +
+        '<button onclick="saveCommute()">この内容で進む</button>' +
+        '<p id="cfStatus" class="muted" style="margin-top:8px;"></p></div>'
+      );
+    }
+
+    function saveCommute() {
+      var commute = document.getElementById('cfCommute').value;
+      var st = document.getElementById('cfStatus');
+      if (!commute) { st.textContent = '通勤手段を選択してください'; return; }
+      st.textContent = '保存中…';
+      callServer_('saveCommute', [STATE.employee.id, STATE.lineUserId, commute]).then(function (res) {
+        applyPayload(res);
+      }).catch(showError);
+    }
+
+    // サーバーから返った内容に応じて、回答フォームか書類一覧かを出し分ける
+    function applyPayload(res) {
+      STATE.employee = res.employee;
+      STATE.docs = res.docs || [];
+      STATE.companies = res.companies || STATE.companies;
+      STATE.commutes = res.commutes || STATE.commutes;
+      if (res.needsCommute) { renderCommuteForm(res); return; }
+      renderList(res);
+    }
+
+    // 管理者の通知先ID登録用：自分のLINEユーザーIDを表示するだけ(書類機能は使わない)
+    function renderWhoami(profile) {
+      render(
+        '<div class="card"><h2>あなたのLINEユーザーID</h2>' +
+        '<p class="muted">表示名：' + (profile.displayName || '') + '</p>' +
+        '<input type="text" readonly value="' + profile.userId + '" onclick="this.select()" ' +
+        'style="width:100%;padding:10px;border:1px solid #DBE1DF;border-radius:8px;font-size:.85rem;box-sizing:border-box;">' +
+        '<div style="height:10px"></div>' +
+        '<button onclick="copyWhoami(\'' + profile.userId + '\')">IDをコピー</button>' +
+        '<p class="muted" style="margin-top:10px;">このIDを、管理者用画面の「設定」→「管理者一覧」に登録すると、書類提出の通知がこのLINEに届くようになります。</p>' +
+        '<p id="copyStatus" class="muted"></p></div>'
+      );
+    }
+
+    function copyWhoami(id) {
+      var done = function () { document.getElementById('copyStatus').textContent = 'コピーしました'; };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(id).then(done, function () { document.getElementById('copyStatus').textContent = '長押しで選択してコピーしてください'; });
+      } else {
+        document.getElementById('copyStatus').textContent = '長押しで選択してコピーしてください';
+      }
+    }
+
+    function boot() {
+      debugLog('boot() 開始 eid=' + JSON.stringify(EID) + ' mode=' + MODE + ' url=' + location.href);
+
+      fetch('/api/liff/config').then(function (res) { return res.json(); }).then(function (config) {
+        var liffId = config.liffId;
+        SDK_LOAD_HANDLED_ = true;
+        if (SDK_PRELOAD_WATCHDOG_) { clearTimeout(SDK_PRELOAD_WATCHDOG_); }
+        if (!liffId) {
+          debugLog('LIFF_IDが空のため中断');
+          render('<div class="card"><p>LIFFチャネルIDが未設定です。管理画面の「設定」から登録してください。</p></div>');
+          return;
+        }
+        if (typeof liff === 'undefined') {
+          debugLog('typeof liff === undefined のため中断');
+          render('<div class="card"><p>LINEの機能の読み込みに失敗しました。</p>' +
+            '<p class="muted">通信状況が不安定な可能性があります。Wi-Fiをオフにしてモバイル通信で開く、または電波の良い場所で再度お試しください。</p>' +
+            '<div style="height:8px;"></div><button onclick="location.reload()">再読み込みする</button></div>');
+          return;
+        }
+        debugLog('liff.isInClient() = ' + liff.isInClient());
+        BOOT_WATCHDOG_ = setTimeout(function () {
+          debugLog('BOOT_WATCHDOG_発火(12秒経過してもliff.init()が完了していない)');
+          render('<div class="card"><p>読み込みに時間がかかっています。</p>' +
+            '<p class="muted">通信状況が不安定な可能性があります。Wi-Fiをオフにしてモバイル通信で開く、または電波の良い場所で再度お試しください。</p>' +
+            '<div style="height:8px;"></div><button onclick="location.reload()">再読み込みする</button></div>');
+        }, 12000);
+
+        debugLog('liff.init() 呼び出し');
+        liff.init({ liffId: liffId }).then(function () {
+          var loggedIn = liff.isLoggedIn();
+          debugLog('liff.init() 成功。isLoggedIn=' + loggedIn);
+          if (!loggedIn) {
+            debugLog('liff.login() を呼び出します(この後LINE側へ画面遷移します)');
+            liff.login();
+            return;
+          }
+          debugLog('liff.getProfile() 呼び出し');
+          return liff.getProfile();
+        }).then(function (profile) {
+          if (!profile) { debugLog('profileが空(liff.login()の遷移待ちのため、ここで処理終了)'); return; }
+          debugLog('liff.getProfile() 成功。userId=' + profile.userId);
+          if (MODE === 'whoami') { renderWhoami(profile); return; }
+          STATE.lineUserId = profile.userId;
+          STATE.displayName = profile.displayName;
+
+          if (EID) {
+            debugLog('liffBind() 呼び出し (eid=' + EID + ')');
+            callServer_('liffBind', [EID, profile.userId, profile.displayName]).then(function (res) {
+              debugLog('liffBind() 成功: ' + JSON.stringify(res));
+              if (!res.ok) { render('<div class="card"><p>' + res.error + '</p></div>'); return; }
+              applyPayload(res);
+            }).catch(function (err) {
+              debugLog('liffBind() 失敗: ' + (err && err.message ? err.message : err));
+              showError(err);
+            });
+            return;
+          }
+
+          debugLog('getMyStatusByLine() 呼び出し');
+          callServer_('getMyStatusByLine', [profile.userId]).then(function (res) {
+            debugLog('getMyStatusByLine() 成功: matched=' + res.matched);
+            if (res.matched) { applyPayload(res); return; }
+            loadIdentityForm_();
+          }).catch(function (err) {
+            debugLog('getMyStatusByLine() 失敗: ' + (err && err.message ? err.message : err));
+            showError(err);
+          });
+        }).catch(function (err) {
+          debugLog('liff.init()/login()チェーンで失敗: ' + (err && err.message ? err.message : err) + (err && err.code ? (' code=' + err.code) : ''));
+          render('<div class="card"><p>LINEログインの初期化に失敗しました。時間をおいて再度お試しください。</p><p class="muted">' + err + '</p></div>');
+        });
+      }).catch(function (err) {
+        debugLog('設定の取得に失敗: ' + err);
+        render('<div class="card"><p>設定の取得に失敗しました。時間をおいて再度お試しください。</p></div>');
+      });
+    }
+
+    function showError(err) {
+      render('<div class="card"><p>エラーが発生しました。</p><p class="muted">' + (err && err.message ? err.message : err) + '</p></div>');
+    }
+
+    function renderList(res) {
+      var e = STATE.employee;
+      var rows = res.docs.map(function (d) {
+        if (d.status === '対象外') {
+          return '<div class="doc-row na"><span>' + d.label + '</span><span class="pill st-対象外">対象外</span></div>';
+        }
+        var clickable = (d.status === '未提出' || d.status === '差し戻し');
+        return '<div class="doc-row" onclick="' + (clickable ? "openDoc('" + d.key + "')" : '') + '">' +
+          '<span>' + d.label + (d.requiresOriginal ? '（原本）' : '') + '</span>' +
+          '<span class="pill st-' + d.status + '">' + d.status + '</span></div>';
+      }).join('');
+
+      var rejected = res.docs.filter(function (d) { return d.status === '差し戻し'; });
+      var rejectedHtml = rejected.map(function (d) {
+        return '<div class="card"><b>' + d.label + '</b><div class="reason">' + d.rejectReason + '</div>' +
+          '<button onclick="openDoc(\'' + d.key + '\')">この書類を再提出する</button></div>';
+      }).join('');
+
+      render(
+        '<div class="card"><h2>ようこそ、' + e.name + 'さん</h2>' +
+        '<p class="muted">' + e.company + '・' + e.commute + '・進捗 ' + res.progressPct + '%' +
+        ' <a href="#" onclick="renderCommuteForm({employee: STATE.employee}); return false;" style="color:#16867C;">変更</a></p></div>' +
+        '<div class="card">' + rows + '</div>' +
+        rejectedHtml +
+        '<div id="uploadArea"></div>'
+      );
+    }
+
+    function escHtml_(v) {
+      return String(v == null ? '' : v)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function openDoc(key) {
+      STATE.currentDocKey = key;
+      var doc = STATE.docs.filter(function (d) { return d.key === key; })[0];
+      document.getElementById('uploadArea').innerHTML =
+        '<div class="card"><h2>' + doc.label + 'のアップロード</h2>' +
+        (doc.description ? '<p class="muted" style="white-space:pre-wrap;">' + escHtml_(doc.description) + '</p>' : '') +
+        '<p class="muted">' + (doc.pdfAllowed ? '画像またはPDFを選択してください' : '写真を選択してください') + '</p>' +
+        '<input type="file" id="fileInput" accept="' + (doc.pdfAllowed ? 'image/*,application/pdf' : 'image/*') + '">' +
+        '<div style="height:10px"></div><button onclick="doUpload()">アップロードする</button>' +
+        '<div id="uploadStatus" class="muted" style="margin-top:8px;"></div></div>';
+      document.getElementById('uploadArea').scrollIntoView();
+    }
+
+    // 画像は縦横1600pxを上限にリサイズしてJPEG圧縮する(4.5MB程度に収めるため)。PDFはそのまま送る。
+    function compressImage_(file) {
+      return new Promise(function (resolve, reject) {
+        if (file.type === 'application/pdf') {
+          var r = new FileReader();
+          r.onload = function () { resolve({ base64: r.result.split(',')[1], mimeType: file.type, ext: 'pdf' }); };
+          r.onerror = reject;
+          r.readAsDataURL(file);
+          return;
+        }
+        var img = new Image();
+        var url = URL.createObjectURL(file);
+        img.onload = function () {
+          var maxSide = 1600;
+          var scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+          var canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          var dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          URL.revokeObjectURL(url);
+          resolve({ base64: dataUrl.split(',')[1], mimeType: 'image/jpeg', ext: 'jpg' });
+        };
+        img.onerror = reject;
+        img.src = url;
+      });
+    }
+
+    function doUpload() {
+      var input = document.getElementById('fileInput');
+      var file = input.files[0];
+      if (!file) return;
+      showOverlay();
+      document.getElementById('uploadStatus').textContent = '画像を圧縮中…';
+      compressImage_(file).then(function (result) {
+        document.getElementById('uploadStatus').textContent = 'アップロード中…';
+        callServer_('submitDocument', [STATE.employee.id, STATE.currentDocKey, result.base64, result.mimeType, result.ext])
+          .then(applyPayload).catch(showError);
+      }).catch(function (err) { hideOverlay(); showError(err); });
+    }
+
+    boot();
+  </script>
+</body>
+</html>
