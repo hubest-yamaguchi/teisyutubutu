@@ -1,5 +1,36 @@
 # 変更履歴
 
+## 2026-08-28 — Cloudflare Access設定・LINE公式アカウント接続
+
+前回(2026-08-27)の「この後やることリスト」のうち、Cloudflare AccessとLINE接続の2つに対応した。
+
+### Cloudflare Access設定
+
+- Zero Trustチーム`hubest`(`hubest.cloudflareaccess.com`)を作成し、アプリケーション`teisyutubutu`を登録(`/admin`・`/api/admin`を保護、パス2つを1アプリの複数宛先として設定)
+- ログイン方法はIDプロバイダー未追加のためデフォルトのOne-time PINを使用
+- ポリシー「HR管理者」で`m-yamaguchi@hubest.jp`・`yechang@hubest.jp`を許可
+- `wrangler.toml`の`CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD`に実際の値を設定してデプロイし、管理画面ログインを確認
+- 副次的に発見した不具合を修正: ルートURL(`/`)にフェーズ1〜2時代の古いプレースホルダー文言(`public/index.html`)が残っており、Cloudflareの静的アセット配信がWorkerコードの`/`→`/liff/`リダイレクトより先に処理されるため、そのまま表示されてしまっていた。`/liff/`へのmetaリフレッシュに変更
+
+### LINE公式アカウント接続
+
+以下の理由から、GAS版が使っていた公式アカウントとは別に、新規で用意する方針とした。
+
+- 最有力候補だった既存の「ヒューベストホールディング【採用】」(友だち3,397人)は、LINE Official Account Manager上では管理者権限があるにもかかわらず、LINE Developersコンソール側のプロバイダー権限が(複数アカウントで試したが)無く、アクセスできなかった。OA Manager側の権限とDeveloper Console側のプロバイダー権限は別の仕組みであることが判明
+- LIFF(ログイン)チャネルとMessaging API(通知送信)チャネルは、必ず同じプロバイダー配下にある必要がある(違うとLINE IDが一致せず通知が届かない)。これを踏まえ、まず動作確認のため一時的に間借りした「U-Select佐賀車両問合せ専用窓口」(既存の別事業用アカウント)で一連の動作を検証
+- 最終的に、入社書類提出専用の新しい公式アカウント「hubest入社書類提出」(Basic ID: `@355bzxfm`)を作成。同じプロバイダー内にLINEログイン(LIFF)チャネルも作成し直し(LIFF ID: `2011305186-qpvABmIY`)、「リンクされたLINE公式アカウント」設定で紐付け、公開(Publish)済み
+- 管理画面の「設定」にチャネルアクセストークン・LIFFチャネルIDを登録
+- 手順は[公式LINEアカウント切替手順.md](./公式LINEアカウント切替手順.md)に記録(今後、正式な公式アカウントへさらに切り替える際にも流用可能)
+
+### 今回はデータ移行を対象外とした
+
+新規利用(既存データの移行元が無い)であることを確認し、`migrate-from-sheets.ts`は今回は使用しないと決定。
+
+### 残課題
+
+- 管理画面の「管理者権限設定」で、`admins`テーブルに登録済みのメールアドレス(`yechang@hubest.co.jp`)とCloudflare Accessポリシーのメールアドレス(`yechang@hubest.jp`/`m-yamaguchi@hubest.jp`)にドメインの食い違いがあり、「アクセス権限がありません」エラーが発生中。要調査・修正
+- LIFF側の友だち追加プロンプト〜本人確認〜通知の一連の動作の最終確認が未完了
+
 ## 2026-08-27 — 実装完了(フェーズ1〜6)・Cloudflareアカウント側の初期セットアップ
 
 GASからCloudflareへの完全移行(入社書類管理システム)を実施。既存のGASコード(`gas-app`/`gas-app-liff`)は一切変更せず、リポジトリとして手を加えず保存。新規実装は本リポジトリ`teisyutubutu`で行った。詳細な設計は `.claude/plans` のプラン(GAS→Cloudflare 完全移行)を参照。

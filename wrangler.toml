@@ -23,5 +23,5 @@ bucket_name = "teisyutubutu-docs"
 ENVIRONMENT = "production"
 
 # Cloudflare Access(Zero Trust)アプリを作成したら、以下を実際の値に置き換える
-CF_ACCESS_TEAM_DOMAIN = ""
-CF_ACCESS_AUD = ""
+CF_ACCESS_TEAM_DOMAIN = "hubest.cloudflareaccess.com"
+CF_ACCESS_AUD = "0ce1494ae79b5321a5d2559d49928d567714306c1e33ec2234f099fdc13475ae"
