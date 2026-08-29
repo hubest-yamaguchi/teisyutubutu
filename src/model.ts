@@ -4,7 +4,7 @@
 export const COMPANIES = ['ホンダカーズ佐賀', 'モビリティズ', 'たてものや', '佐賀バルーナーズ'] as const;
 export const COMMUTES = ['車', '自転車', '電車・バス・徒歩'] as const;
 
-export type DocCondition = { type: 'commute' | 'company'; value: string };
+export type DocCondition = { type: 'commute'; value: string };
 
 export type DocType = {
   key: string;
@@ -13,6 +13,7 @@ export type DocType = {
   pdfAllowed?: boolean;
   sensitive?: boolean;
   condition?: DocCondition;
+  companies?: string[]; // 空/未指定なら全社共通。指定した法人の内定者にのみ提出を求める
   description?: string;
 };
 
@@ -50,7 +51,7 @@ export const DOC_TYPES: DocType[] = [
     description: '自転車で通勤される方は、自転車保険（事故によるご自身のケガを補償する傷害保険と、他人への賠償に備える個人賠償責任保険がセットになったもの）への加入が条件です。加入済みの場合は保険証券を、未加入の場合は加入手続き後に証券を提出してください。ご家族の自動車保険の特約で対応できる場合もあるため、迷ったら総務課にご相談ください。'
   },
   {
-    key: 'leaseContract', label: '賃貸借契約書の写し', condition: { type: 'company', value: '佐賀バルーナーズ' },
+    key: 'leaseContract', label: '賃貸借契約書の写し', companies: ['佐賀バルーナーズ'],
     description: '入社時の住所で、ご本人名義の賃貸借契約がある方が対象です。契約書の写しを提出してください（ご本人名義の契約がない場合は提出不要です）。'
   }
 ];
@@ -93,10 +94,10 @@ export function docMeta(key: string, docTypes: DocType[] = DOC_TYPES): DocType |
 }
 
 // employeeはEmployees行相当(Company/Commuteはこの綴りのプロパティ名)を想定。
+// 配属先(companies)と通勤手段(condition)は独立した軸なので、両方の条件を満たす場合のみ対象とする。
 export function isApplicable(doc: DocType, employee: EmployeeLike): boolean {
-  if (!doc.condition) return true;
-  if (doc.condition.type === 'commute') return employee.Commute === doc.condition.value;
-  if (doc.condition.type === 'company') return employee.Company === doc.condition.value;
+  if (doc.companies && doc.companies.length > 0 && !doc.companies.includes(employee.Company || '')) return false;
+  if (doc.condition && doc.condition.type === 'commute') return employee.Commute === doc.condition.value;
   return true;
 }
 

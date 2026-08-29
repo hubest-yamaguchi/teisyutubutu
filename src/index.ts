@@ -2,10 +2,19 @@ import { Hono } from 'hono';
 import type { Env } from './bindings';
 import * as liffApi from './api/liff';
 import * as adminApi from './api/admin';
+import * as authApi from './api/auth';
 import { ApiError as LiffApiError } from './api/liff';
 import { ApiError as AdminApiError } from './api/admin';
-import { getVerifiedAdminEmail } from './auth';
+import { AuthError } from './api/auth';
+import { getSessionEmail, issueSessionCookie, clearSessionCookie } from './session';
 import { getEmployeeFile } from './r2';
+import { findAdminByEmail } from './db/admins';
+
+async function nameFor(db: D1Database, email: string | null): Promise<string> {
+  if (!email) return '';
+  const admin = await findAdminByEmail(db, email);
+  return admin?.Name || '';
+}
 
 type Variables = { adminEmail: string };
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -52,27 +61,81 @@ function dispatch<TError extends Error>(
 
 const LIFF_FUNCTIONS: Record<string, (env: Env, ...args: any[]) => Promise<unknown>> = {
   liffBind: liffApi.liffBind,
-  identifyAndBind: liffApi.identifyAndBind,
+  findByKana: liffApi.findByKana,
+  confirmBind: liffApi.confirmBind,
   saveCommute: liffApi.saveCommute,
   getMyDocuments: liffApi.getMyDocuments,
   submitDocument: liffApi.submitDocument,
-  getMyStatusByLine: liffApi.getMyStatusByLine,
-  getJobTypeOptions: liffApi.getJobTypeOptionsApi
+  getMyStatusByLine: liffApi.getMyStatusByLine
 };
 
 app.post('/api/liff/:fn', dispatch(LIFF_FUNCTIONS, LiffApiError, () => []));
 
-// ---------- 管理画面: Cloudflare Access認証 ----------
-// 本番はCloudflare Access(Zero Trust)が/admin配下を保護し、検証済みJWTをCf-Access-Jwt-Assertionで渡してくる。
-// ここではそのJWTをAccessの公開鍵で再検証し、メールアドレスをc.set('adminEmail', email)で後続に渡す。
-// ローカル開発(wrangler dev)ではAccessが前段に無くCF_ACCESS_*も未設定のため、
-// ENVIRONMENT=development の間だけ X-Debug-Admin-Email ヘッダーを信頼する(本番では絶対に効かない)。
+// ---------- 管理画面: ID/パスワードログイン ----------
+// 旧: Cloudflare Access(Zero Trust)。新規管理者ごとにAccessのポリシー編集が必要で運用が煩雑だったため、
+// このWorker自身がログインを検証し、セッションCookie(admin_session)を発行する方式に変更した(src/session.ts)。
+
+function authErrorResponse(c: any, err: unknown) {
+  const message = err instanceof AuthError || err instanceof Error ? err.message : String(err);
+  return c.json({ ok: false, error: message }, err instanceof AuthError ? 400 : 500);
+}
+
+app.post('/api/auth/login', async (c) => {
+  try {
+    const body = await c.req.json();
+    const email = await authApi.login(c.env, String(body.email || '').trim(), String(body.password || ''));
+    c.header('Set-Cookie', await issueSessionCookie(c.env.DB, email));
+    return c.json({ ok: true, result: { email, name: await nameFor(c.env.DB, email) } });
+  } catch (err) {
+    return authErrorResponse(c, err);
+  }
+});
+
+// 管理者一覧には登録済みだがパスワード未設定のメールアドレスが、初めてここでパスワードを設定する
+// (adminsが1件も無い初回デプロイ直後は、このメールで最初の管理者を全権限で作成する)
+app.post('/api/auth/claim', async (c) => {
+  try {
+    const body = await c.req.json();
+    const email = String(body.email || '').trim();
+    await authApi.claimAccount(c.env, String(body.name || ''), email, String(body.password || ''));
+    c.header('Set-Cookie', await issueSessionCookie(c.env.DB, email));
+    return c.json({ ok: true, result: { email, name: await nameFor(c.env.DB, email) } });
+  } catch (err) {
+    return authErrorResponse(c, err);
+  }
+});
+
+app.post('/api/auth/logout', async (c) => {
+  c.header('Set-Cookie', await clearSessionCookie(c.req.raw, c.env.DB));
+  return c.json({ ok: true, result: {} });
+});
+
+app.get('/api/auth/me', async (c) => {
+  const email = await getSessionEmail(c.req.raw, c.env.DB);
+  return c.json({ ok: true, result: { email, name: await nameFor(c.env.DB, email) } });
+});
+
+app.post('/api/auth/change-password', async (c) => {
+  const email = await getSessionEmail(c.req.raw, c.env.DB);
+  if (!email) return c.json({ ok: false, error: '認証が必要です' }, 401);
+  try {
+    const body = await c.req.json();
+    await authApi.changePassword(c.env, email, String(body.currentPassword || ''), String(body.newPassword || ''));
+    return c.json({ ok: true, result: {} });
+  } catch (err) {
+    return authErrorResponse(c, err);
+  }
+});
+
+// ---------- 管理画面: セッション認証が必要なAPI群 ----------
+// ローカル開発(wrangler dev)では、ENVIRONMENT=developmentの間だけ X-Debug-Admin-Email ヘッダーを信頼する
+// (本番のENVIRONMENT=productionでは絶対に効かない)。
 app.use('/api/admin/*', async (c, next) => {
-  let email = await getVerifiedAdminEmail(c.req.raw, c.env);
+  let email = await getSessionEmail(c.req.raw, c.env.DB);
   if (!email && c.env.ENVIRONMENT === 'development') {
     email = c.req.header('X-Debug-Admin-Email') || null;
   }
-  if (!email) return c.json({ ok: false, error: '認証情報が確認できませんでした' }, 401);
+  if (!email) return c.json({ ok: false, error: '認証が必要です' }, 401);
   c.set('adminEmail', email);
   await next();
 });
@@ -93,15 +156,17 @@ const ADMIN_FUNCTIONS: Record<string, (env: Env, email: string, ...args: any[]) 
   settingsAddEmployee: adminApi.settingsAddEmployee,
   settingsBulkAddEmployees: adminApi.settingsBulkAddEmployees,
   settingsBulkSetHireDate: adminApi.settingsBulkSetHireDate,
+  settingsRemoveEmployee: adminApi.settingsRemoveEmployee,
   settingsAddTemplate: adminApi.settingsAddTemplate,
   settingsRemoveTemplate: adminApi.settingsRemoveTemplate,
   settingsAddAdmin: adminApi.settingsAddAdmin,
   settingsRemoveAdmin: adminApi.settingsRemoveAdmin,
+  settingsUpdateAdmin: adminApi.settingsUpdateAdmin,
+  settingsSaveTabOrder: adminApi.settingsSaveTabOrder,
   settingsSaveLineChannel: adminApi.settingsSaveLineChannel,
-  settingsSaveNotifyProvider: adminApi.settingsSaveNotifyProvider,
-  settingsSaveLiny: adminApi.settingsSaveLiny,
   settingsSaveDocConfig: adminApi.settingsSaveDocConfig,
   settingsRemoveDocConfig: adminApi.settingsRemoveDocConfig,
+  settingsReorderDocConfig: adminApi.settingsReorderDocConfig,
   settingsSaveJobType: adminApi.settingsSaveJobType,
   settingsRemoveJobType: adminApi.settingsRemoveJobType,
   settingsRunSetup: adminApi.settingsRunSetup

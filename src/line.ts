@@ -1,7 +1,7 @@
 // gas-app-liff/Line.gs, gas-app/Line.gs の移植。UrlFetchApp -> fetch。
 
 import { getSetting } from './db/settings';
-import { SETTINGS_KEYS, NOTIFY_PROVIDERS } from './db/settings';
+import { SETTINGS_KEYS } from './db/settings';
 import { listAdmins } from './db/admins';
 import { logNotifications, buildNotificationLogRow, SendResult, NotificationDirection } from './db/notifications';
 
@@ -9,15 +9,6 @@ type NotificationRequest = { url: string; method: 'POST'; headers: Record<string
 type BuiltNotification = { skip: string } | { request: NotificationRequest };
 
 async function buildNotificationRequest(db: D1Database, lineUserId: string, message: string): Promise<BuiltNotification> {
-  const provider = (await getSetting(db, SETTINGS_KEYS.NOTIFY_PROVIDER)) || NOTIFY_PROVIDERS.LINE;
-
-  if (provider === NOTIFY_PROVIDERS.LINY) {
-    const apiKey = await getSetting(db, SETTINGS_KEYS.LINY_API_KEY);
-    if (!apiKey) return { skip: 'Liny HR APIキー未設定' };
-    // Liny側の正式なAPI仕様が未確認のため未実装(gas-app/Line.gsと同じ状態)。
-    return { skip: 'Liny HR連携は仕様確認中のため未実装です' };
-  }
-
   const token = await getSetting(db, SETTINGS_KEYS.LINE_CHANNEL_ACCESS_TOKEN);
   if (!token) return { skip: 'LINEアクセストークン未設定' };
   if (!lineUserId) return { skip: 'LINEユーザーID未登録' };

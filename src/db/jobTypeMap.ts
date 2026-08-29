@@ -10,10 +10,6 @@ export async function getJobTypeCompanyMap(db: D1Database): Promise<Record<strin
   return map;
 }
 
-export async function getJobTypeOptions(db: D1Database): Promise<string[]> {
-  return Object.keys(await getJobTypeCompanyMap(db));
-}
-
 export async function setJobTypeCompany(db: D1Database, jobType: string, company: string): Promise<void> {
   await db
     .prepare(

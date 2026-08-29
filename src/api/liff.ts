@@ -2,8 +2,8 @@
 
 import type { Env } from '../bindings';
 import { COMMUTES, computeStage, progressPct, isApplicable, STATUS, DocType } from '../model';
-import { findEmployeeById, findEmployeeByLineUserId, findUnlinkedEmployeesByIdentity, saveEmployee, Employee } from '../db/employees';
-import { getJobTypeCompanyMap, getJobTypeOptions } from '../db/jobTypeMap';
+import { findEmployeeById, findEmployeeByLineUserId, findUnlinkedEmployeesByKana, normalizeKana, saveEmployee, Employee } from '../db/employees';
+import { getJobTypeCompanyMap } from '../db/jobTypeMap';
 import { getSubmissionsMap, upsertSubmission } from '../db/submissions';
 import { appendHistory } from '../db/history';
 import { loadDocTypes } from '../db/docConfig';
@@ -75,13 +75,14 @@ export async function getLiffConfig(env: Env) {
   return { liffId: await getSetting(env.DB, SETTINGS_KEYS.LIFF_CHANNEL_ID) };
 }
 
-export async function liffBind(env: Env, eid: string, lineUserId: string, _displayName: string) {
+export async function liffBind(env: Env, eid: string, lineUserId: string, _displayName: string, pictureUrl?: string) {
   const employee = await findEmployeeById(env.DB, eid);
   if (!employee) {
     return { ok: false, error: 'このリンクに対応する新入社員情報が見つかりません。人事担当者にご確認ください。' };
   }
   if (!employee.LineUserId) {
     employee.LineUserId = lineUserId;
+    employee.PictureUrl = pictureUrl || '';
     await saveEmployee(env.DB, employee);
   } else if (employee.LineUserId !== lineUserId) {
     return { ok: false, error: 'このリンクは別の方のLINEアカウントで既に登録されています。人事担当者にご確認ください。' };
@@ -101,29 +102,50 @@ export async function getMyStatusByLine(env: Env, lineUserId: string) {
   return payload;
 }
 
-export async function getJobTypeOptionsApi(env: Env) {
-  return { jobTypes: await getJobTypeOptions(env.DB) };
-}
-
-export async function identifyAndBind(env: Env, kana: string, jobType: string, lineUserId: string, displayName: string) {
-  if (!kana || !jobType) throw new ApiError('フリガナと職種を入力してください');
-  const candidates = await findUnlinkedEmployeesByIdentity(env.DB, kana, jobType);
+// フリガナだけで本人を特定し、まだ紐付けはせず氏名・職種・配属先を確認用に返す(確認画面「この内容で合っていますか？」用)。
+export async function findByKana(env: Env, kana: string) {
+  if (!kana || !String(kana).trim()) throw new ApiError('フリガナを入力してください');
+  const candidates = await findUnlinkedEmployeesByKana(env.DB, kana);
   if (candidates.length === 0) {
-    throw new ApiError('入力内容と一致する新入社員情報が見つかりませんでした。フリガナ・職種をご確認のうえ、正しい場合は人事担当者にご連絡ください。');
+    throw new ApiError('入力内容と一致する新入社員情報が見つかりませんでした。フリガナをご確認のうえ、正しい場合はお手数ですが総務課へご連絡ください。');
   }
   if (candidates.length > 1) {
-    throw new ApiError('入力内容だけでは特定できませんでした。お手数ですが人事担当者にご連絡ください。');
-  }
-  const company = (await getJobTypeCompanyMap(env.DB))[String(jobType).trim()];
-  if (!company) {
-    throw new ApiError('この職種に対応する配属先が見つかりませんでした。人事担当者に「職種法人マスタ」の設定をご確認ください。');
+    throw new ApiError('入力内容だけでは特定できませんでした。お手数ですが総務課へご連絡ください。');
   }
   const employee = candidates[0];
+  const company = (await getJobTypeCompanyMap(env.DB))[String(employee.JobType).trim()];
+  if (!company) {
+    throw new ApiError('この職種に対応する配属先が見つかりませんでした。お手数ですが総務課へご連絡ください。');
+  }
+  return {
+    employeeId: employee.EmployeeId,
+    name: employee.Name,
+    kana: employee.Kana,
+    jobType: employee.JobType,
+    company
+  };
+}
+
+// 確認画面で「はい」を選んだ後に呼ぶ。kanaを再度渡し、findByKanaで特定した本人と一致するか再検証してから紐付ける
+// (employeeIdだけを信頼すると、他人のIDを推測して紐付けられてしまうため)。
+export async function confirmBind(env: Env, employeeId: string, kana: string, lineUserId: string, displayName: string, pictureUrl?: string) {
+  const employee = await findEmployeeById(env.DB, employeeId);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  if (normalizeKana(employee.Kana) !== normalizeKana(kana)) {
+    throw new ApiError('確認情報が一致しませんでした。お手数ですが最初からやり直してください。');
+  }
+  if (employee.LineUserId && employee.LineUserId !== lineUserId) {
+    throw new ApiError('このアカウントは別の方のLINEアカウントで既に登録されています。お手数ですが総務課へご連絡ください。');
+  }
+  const company = (await getJobTypeCompanyMap(env.DB))[String(employee.JobType).trim()];
+  if (!company) {
+    throw new ApiError('この職種に対応する配属先が見つかりませんでした。お手数ですが総務課へご連絡ください。');
+  }
   employee.LineUserId = lineUserId;
-  employee.JobType = jobType;
   employee.Company = company;
+  employee.PictureUrl = pictureUrl || '';
   await saveEmployee(env.DB, employee);
-  await appendHistory(env.DB, employee.EmployeeId, '', 'LINE連携', `LINE表示名: ${displayName || ''} / 職種: ${jobType} / 配属先: ${company}`, '');
+  await appendHistory(env.DB, employee.EmployeeId, '', 'LINE連携', `LINE表示名: ${displayName || ''} / 職種: ${employee.JobType} / 配属先: ${company}`, '');
 
   const payload = await buildDocumentsPayload(env.DB, employee);
   payload.ok = true;

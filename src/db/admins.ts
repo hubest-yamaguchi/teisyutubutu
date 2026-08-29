@@ -1,6 +1,9 @@
 // gas-app/Repo.gs の Admins 関連 + Auth.gs の認可判定の移植。
-// GroupsAppによるグループ判定は廃止し、admins テーブルの列(IsSuperAdmin/MyNumberCompaniesJson)で判定する。
-// ブートストラップモード(Auth.gsと同じ考え方): adminsが1件も無い間は、初回セットアップ担当者を通すため誰でもHR管理者/代表管理者として扱う。
+// GroupsAppによるグループ判定は廃止し、admins テーブルの列(PermissionsJson/MyNumberCompaniesJson)で判定する。
+// 権限は「代表管理者かどうか」の単一フラグではなく、設定ページのカテゴリ単位のチェックボックス(Permissions)で管理する。
+// ログインはCloudflare AccessからID/パスワード(PasswordHash)方式に変更した(src/crypto.ts, src/api/auth.ts)。
+
+import { SettingsCategory, sanitizePermissions } from '../permissions';
 
 export type Admin = {
   AdminId: string;
@@ -8,8 +11,9 @@ export type Admin = {
   Email: string;
   Company: string;
   LineUserId: string;
-  IsSuperAdmin: boolean;
   MyNumberCompanies: string[];
+  Permissions: SettingsCategory[];
+  HasPassword: boolean;
 };
 
 type AdminRow = {
@@ -18,8 +22,9 @@ type AdminRow = {
   Email: string;
   Company: string;
   LineUserId: string;
-  IsSuperAdmin: number;
   MyNumberCompaniesJson: string;
+  PermissionsJson: string;
+  PasswordHash: string;
 };
 
 function fromRow(row: AdminRow): Admin {
@@ -29,14 +34,21 @@ function fromRow(row: AdminRow): Admin {
   } catch {
     myNumberCompanies = [];
   }
+  let permissions: string[] = [];
+  try {
+    permissions = JSON.parse(row.PermissionsJson || '[]');
+  } catch {
+    permissions = [];
+  }
   return {
     AdminId: row.AdminId,
     Name: row.Name,
     Email: row.Email,
     Company: row.Company,
     LineUserId: row.LineUserId,
-    IsSuperAdmin: !!row.IsSuperAdmin,
-    MyNumberCompanies: myNumberCompanies
+    MyNumberCompanies: myNumberCompanies,
+    Permissions: sanitizePermissions(permissions),
+    HasPassword: !!row.PasswordHash
   };
 }
 
@@ -58,22 +70,48 @@ export async function findAdminByEmail(db: D1Database, email: string): Promise<A
 
 export async function isHrAdmin(db: D1Database, email: string): Promise<boolean> {
   if (!email) return false;
-  if ((await countAdmins(db)) === 0) return true; // ブートストラップモード
   return (await findAdminByEmail(db, email)) !== null;
 }
 
-export async function isSuperAdmin(db: D1Database, email: string): Promise<boolean> {
-  if (!email) return false;
-  if ((await countAdmins(db)) === 0) return true; // ブートストラップモード
+// カテゴリ単位の権限チェック(旧: requireSuperAdmin_)。管理者一覧のチェックボックスで管理者ごとに設定する。
+export async function hasCategoryPermission(db: D1Database, email: string, category: SettingsCategory): Promise<boolean> {
   const admin = await findAdminByEmail(db, email);
-  return !!admin?.IsSuperAdmin;
+  return !!admin?.Permissions.includes(category);
 }
 
 export async function canViewMyNumber(db: D1Database, email: string, company: string): Promise<boolean> {
-  if (!(await isHrAdmin(db, email))) return false;
   const admin = await findAdminByEmail(db, email);
-  if (!admin) return false; // ブートストラップ中でも、マイナンバーは明示的な許可がなければ見せない
+  if (!admin) return false;
   return admin.MyNumberCompanies.includes(company);
+}
+
+// パスワード検証用。ハッシュそのものはAdmin型に含めない(一覧表示APIで誤って返さないため)。
+export async function getPasswordHash(db: D1Database, email: string): Promise<string> {
+  const row = await db.prepare('SELECT PasswordHash FROM admins WHERE Email = ?').bind(email).first<{ PasswordHash: string }>();
+  return row?.PasswordHash ?? '';
+}
+
+export async function setPasswordHash(db: D1Database, email: string, hash: string): Promise<void> {
+  await db.prepare('UPDATE admins SET PasswordHash = ? WHERE Email = ?').bind(hash, email).run();
+}
+
+export async function updateAdmin(
+  db: D1Database,
+  adminId: string,
+  admin: { Name: string; Email: string; Company?: string; LineUserId?: string; Permissions?: SettingsCategory[]; MyNumberCompanies?: string[] }
+): Promise<void> {
+  await db
+    .prepare('UPDATE admins SET Name=?, Email=?, Company=?, LineUserId=?, PermissionsJson=?, MyNumberCompaniesJson=? WHERE AdminId=?')
+    .bind(
+      admin.Name,
+      admin.Email,
+      admin.Company ?? '',
+      admin.LineUserId ?? '',
+      JSON.stringify(sanitizePermissions(admin.Permissions ?? [])),
+      JSON.stringify(admin.MyNumberCompanies ?? []),
+      adminId
+    )
+    .run();
 }
 
 function maxNumericSuffix(ids: string[]): number {
@@ -93,12 +131,12 @@ export async function nextAdminId(db: D1Database): Promise<string> {
 
 export async function addAdmin(
   db: D1Database,
-  admin: { Name: string; Email: string; Company?: string; LineUserId?: string; IsSuperAdmin?: boolean; MyNumberCompanies?: string[] }
+  admin: { Name: string; Email: string; Company?: string; LineUserId?: string; Permissions?: SettingsCategory[]; MyNumberCompanies?: string[] }
 ): Promise<string> {
   const id = await nextAdminId(db);
   await db
     .prepare(
-      `INSERT INTO admins (AdminId, Name, Email, Company, LineUserId, IsSuperAdmin, MyNumberCompaniesJson)
+      `INSERT INTO admins (AdminId, Name, Email, Company, LineUserId, PermissionsJson, MyNumberCompaniesJson)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
@@ -107,7 +145,7 @@ export async function addAdmin(
       admin.Email,
       admin.Company ?? '',
       admin.LineUserId ?? '',
-      admin.IsSuperAdmin ? 1 : 0,
+      JSON.stringify(sanitizePermissions(admin.Permissions ?? [])),
       JSON.stringify(admin.MyNumberCompanies ?? [])
     )
     .run();

@@ -156,8 +156,8 @@
       showOverlay();
       return new Promise(function (resolve) { setTimeout(resolve, 350); }).then(function () {
         hideOverlay();
-        if (fn === 'getJobTypeOptions') return { jobTypes: DEMO_JOB_TYPES };
-        if (fn === 'identifyAndBind') return { ok: true, matched: true, needsCommute: true, employee: DEMO_EMPLOYEE, companies: [], commutes: ['車', '自転車', '電車・バス・徒歩'], docs: [], progressPct: 0, stage: '未提出' };
+        if (fn === 'findByKana') return { employeeId: DEMO_EMPLOYEE.id, name: DEMO_EMPLOYEE.name, kana: 'ヤマダ タロウ', jobType: DEMO_JOB_TYPES[0], company: DEMO_EMPLOYEE.company };
+        if (fn === 'confirmBind') return { ok: true, matched: true, needsCommute: true, employee: DEMO_EMPLOYEE, companies: [], commutes: ['車', '自転車', '電車・バス・徒歩'], docs: [], progressPct: 0, stage: '未提出' };
         if (fn === 'saveCommute') {
           DEMO_EMPLOYEE.commute = args[2];
           return demoPayload();
@@ -191,7 +191,7 @@
       });
     }
 
-    var STATE = { employee: null, docs: [], currentDocKey: null, lineUserId: null, displayName: '', companies: [], commutes: [] };
+    var STATE = { employee: null, docs: [], currentDocKey: null, lineUserId: null, displayName: '', pictureUrl: '', companies: [], commutes: [] };
 
     var BOOT_WATCHDOG_ = null;
     function render(html) {
@@ -199,41 +199,69 @@
       document.getElementById('app').innerHTML = html;
     }
 
-    // 共通URL(?eidなし)を初めて開いた人向け：フリガナ・職種を入力して自分の記録を特定してもらう
-    function renderIdentityForm(jobTypes, errorMessage) {
-      var opts = '<option value="">選択してください</option>' + (jobTypes || []).map(function (v) {
-        return '<option value="' + v + '">' + v + '</option>';
-      }).join('');
+    // 共通URL(?eidなし)を初めて開いた人向け：フリガナだけを入力して自分の記録を特定してもらう
+    // (職種は人事の登録データから引き当てるので本人には入力させない。特定できたら確認画面で本人に見て判断してもらう)
+    function renderIdentityForm(errorMessage) {
       render(
         '<div class="card"><h2>はじめに本人確認をお願いします</h2>' +
-        '<p class="muted">人事から伝えられているフリガナ・職種を入力してください。</p>' +
+        '<p class="muted">ご自身のお名前をフリガナ（カタカナ）で、スペースを入れずに入力してください（例：ヤマダタロウ）。</p>' +
         (errorMessage ? '<div class="reason">' + errorMessage + '</div>' : '') +
-        '<label class="muted">フリガナ（カタカナ）</label>' +
-        '<input type="text" id="idKana" style="width:100%;padding:10px;border:1px solid #DBE1DF;border-radius:8px;font-size:.9rem;margin:4px 0 12px;box-sizing:border-box;">' +
-        '<label class="muted">職種</label>' +
-        '<select id="idJobType" style="width:100%;padding:10px;border:1px solid #DBE1DF;border-radius:8px;font-size:.9rem;margin:4px 0 12px;">' + opts + '</select>' +
+        '<label class="muted">フリガナ（カタカナ・スペースなし）</label>' +
+        '<input type="text" id="idKana" oninput="this.value=this.value.replace(/[\\s\\u3000]/g,\'\')" style="width:100%;padding:10px;border:1px solid #DBE1DF;border-radius:8px;font-size:.9rem;margin:4px 0 12px;box-sizing:border-box;">' +
         '<button onclick="submitIdentity()">確認して進む</button>' +
         '<p id="idStatus" class="muted" style="margin-top:8px;"></p></div>'
       );
     }
 
     function loadIdentityForm_(errorMessage) {
-      callServer_('getJobTypeOptions', []).then(function (res) {
-        renderIdentityForm(res.jobTypes, errorMessage);
-      }).catch(showError);
+      renderIdentityForm(errorMessage);
     }
+
+    var PENDING_MATCH = null;
 
     function submitIdentity() {
       var kana = document.getElementById('idKana').value.trim();
-      var jobType = document.getElementById('idJobType').value;
       var st = document.getElementById('idStatus');
-      if (!kana || !jobType) { st.textContent = 'フリガナと職種を入力してください'; return; }
+      if (!kana) { st.textContent = 'フリガナを入力してください'; return; }
       st.textContent = '確認中…';
-      callServer_('identifyAndBind', [kana, jobType, STATE.lineUserId, STATE.displayName]).then(function (res) {
+      callServer_('findByKana', [kana]).then(function (match) {
+        PENDING_MATCH = match;
+        PENDING_MATCH.kanaInput = kana;
+        renderConfirmMatch(match);
+      }).catch(function (err) {
+        renderIdentityForm(err && err.message ? err.message : String(err));
+      });
+    }
+
+    // フリガナで特定できた本人情報を見せて、間違いないか確認してもらう画面
+    function renderConfirmMatch(match) {
+      render(
+        '<div class="card"><h2>この内容で合っていますか？</h2>' +
+        '<p class="muted">下の内容が正しいか確認してください。</p>' +
+        '<div class="doc-row"><b>氏名</b><div>' + match.name + '</div></div>' +
+        '<div class="doc-row"><b>フリガナ</b><div>' + match.kana + '</div></div>' +
+        '<div class="doc-row"><b>配属先法人</b><div>' + match.company + '</div></div>' +
+        '<div style="height:8px;"></div>' +
+        '<button onclick="confirmMatchYes()">はい、間違いありません</button>' +
+        '<div style="height:8px;"></div>' +
+        '<button onclick="confirmMatchNo()" style="background:#8A9490;">いいえ</button>' +
+        '<p id="confirmStatus" class="muted" style="margin-top:8px;"></p></div>'
+      );
+    }
+
+    function confirmMatchYes() {
+      var st = document.getElementById('confirmStatus');
+      st.textContent = '登録中…';
+      callServer_('confirmBind', [PENDING_MATCH.employeeId, PENDING_MATCH.kanaInput, STATE.lineUserId, STATE.displayName, STATE.pictureUrl]).then(function (res) {
         applyPayload(res);
       }).catch(function (err) {
-        loadIdentityForm_(err && err.message ? err.message : String(err));
+        st.textContent = err && err.message ? err.message : String(err);
       });
+    }
+
+    function confirmMatchNo() {
+      render('<div class="card"><h2>本人確認ができませんでした</h2>' +
+        '<p class="muted">お手数ですが総務課へご連絡ください。</p></div>');
     }
 
     // 初回(または変更時)に本人が回答する：通勤手段(書類提出に必要な条件のため、書類一覧の前に確認する)
@@ -349,10 +377,11 @@
           if (MODE === 'whoami') { renderWhoami(profile); return; }
           STATE.lineUserId = profile.userId;
           STATE.displayName = profile.displayName;
+          STATE.pictureUrl = profile.pictureUrl || '';
 
           if (EID) {
             debugLog('liffBind() 呼び出し (eid=' + EID + ')');
-            callServer_('liffBind', [EID, profile.userId, profile.displayName]).then(function (res) {
+            callServer_('liffBind', [EID, profile.userId, profile.displayName, profile.pictureUrl]).then(function (res) {
               debugLog('liffBind() 成功: ' + JSON.stringify(res));
               if (!res.ok) { render('<div class="card"><p>' + res.error + '</p></div>'); return; }
               applyPayload(res);

@@ -3,14 +3,10 @@
 // 実行時に管理画面から変更できる必要がある値のみここに保存する(元のConfig.gsと同じ運用)。
 
 export const SETTINGS_KEYS = {
-  NOTIFY_PROVIDER: 'NOTIFY_PROVIDER',
   LINE_CHANNEL_ACCESS_TOKEN: 'LINE_CHANNEL_ACCESS_TOKEN',
   LIFF_CHANNEL_ID: 'LIFF_CHANNEL_ID',
-  LINY_API_KEY: 'LINY_API_KEY',
-  LINY_ENDPOINT: 'LINY_ENDPOINT'
+  SETTINGS_TAB_ORDER: 'SETTINGS_TAB_ORDER'
 } as const;
-
-export const NOTIFY_PROVIDERS = { LINE: 'line', LINY: 'liny' } as const;
 
 export async function getSetting(db: D1Database, key: string): Promise<string> {
   const row = await db.prepare('SELECT Value FROM settings WHERE Key = ?').bind(key).first<{ Value: string }>();

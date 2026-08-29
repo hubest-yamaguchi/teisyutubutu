@@ -4,14 +4,6 @@
 
 import { DOC_TYPES, DocType, DocCondition } from '../model';
 
-const CONDITION_TYPE_BY_LABEL: Record<string, 'commute' | 'company'> = {
-  通勤手段: 'commute',
-  配属先: 'company',
-  commute: 'commute',
-  company: 'company'
-};
-const CONDITION_TYPE_LABELS: Record<'commute' | 'company', string> = { commute: '通勤手段', company: '配属先' };
-
 type DocConfigRow = {
   DocKey: string;
   Label: string;
@@ -22,6 +14,7 @@ type DocConfigRow = {
   Sensitive: number;
   Description: string;
   SortOrder: number;
+  CompaniesJson: string;
 };
 
 export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
@@ -30,17 +23,23 @@ export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
   if (!rows.length) return DOC_TYPES;
 
   return rows.map((r) => {
+    let companies: string[] = [];
+    try {
+      companies = JSON.parse(r.CompaniesJson || '[]');
+    } catch {
+      companies = [];
+    }
     const d: DocType = {
       key: String(r.DocKey).trim(),
       label: r.Label,
       requiresOriginal: !!r.RequiresOriginal,
       pdfAllowed: !!r.PdfAllowed,
       sensitive: !!r.Sensitive,
-      description: r.Description || ''
+      description: r.Description || '',
+      companies
     };
-    const ctype = CONDITION_TYPE_BY_LABEL[String(r.ConditionType || '').trim()];
-    if (ctype && r.ConditionValue) {
-      d.condition = { type: ctype, value: String(r.ConditionValue).trim() } as DocCondition;
+    if (String(r.ConditionType || '').trim() === '通勤手段' && r.ConditionValue) {
+      d.condition = { type: 'commute', value: String(r.ConditionValue).trim() } as DocCondition;
     }
     return d;
   });
@@ -53,8 +52,8 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
 
   const stmt = db.prepare(
     `INSERT INTO company_document_config
-      (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   await db.batch(
     DOC_TYPES.map((d, i) =>
@@ -63,11 +62,12 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
         d.label,
         d.requiresOriginal ? 1 : 0,
         d.pdfAllowed ? 1 : 0,
-        d.condition ? CONDITION_TYPE_LABELS[d.condition.type] : '',
+        d.condition ? '通勤手段' : '',
         d.condition ? d.condition.value : '',
         d.sensitive ? 1 : 0,
         d.description ?? '',
-        i
+        i,
+        JSON.stringify(d.companies ?? [])
       )
     )
   );
@@ -77,23 +77,24 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
   await db
     .prepare(
       `INSERT INTO company_document_config
-        (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(DocKey) DO UPDATE SET
          Label=excluded.Label, RequiresOriginal=excluded.RequiresOriginal, PdfAllowed=excluded.PdfAllowed,
          ConditionType=excluded.ConditionType, ConditionValue=excluded.ConditionValue, Sensitive=excluded.Sensitive,
-         Description=excluded.Description, SortOrder=excluded.SortOrder`
+         Description=excluded.Description, SortOrder=excluded.SortOrder, CompaniesJson=excluded.CompaniesJson`
     )
     .bind(
       doc.key,
       doc.label,
       doc.requiresOriginal ? 1 : 0,
       doc.pdfAllowed ? 1 : 0,
-      doc.condition ? CONDITION_TYPE_LABELS[doc.condition.type] : '',
+      doc.condition ? '通勤手段' : '',
       doc.condition ? doc.condition.value : '',
       doc.sensitive ? 1 : 0,
       doc.description ?? '',
-      sortOrder
+      sortOrder,
+      JSON.stringify(doc.companies ?? [])
     )
     .run();
 }

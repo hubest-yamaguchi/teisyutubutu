@@ -9,6 +9,7 @@ export type Employee = {
   HireDate: string;
   JobType: string;
   LineUserId: string;
+  PictureUrl?: string;
 };
 
 export async function findEmployeeById(db: D1Database, employeeId: string): Promise<Employee | null> {
@@ -29,13 +30,10 @@ export function normalizeKana(kana: string): string {
     .replace(/\s+/g, '');
 }
 
-// フリガナ・職種が一致し、まだLINEと紐付いていない新入社員を探す(findUnlinkedEmployeesByIdentity_と同じ)
-export async function findUnlinkedEmployeesByIdentity(db: D1Database, kana: string, jobType: string): Promise<Employee[]> {
-  const normJobType = String(jobType || '').trim();
-  const { results } = await db
-    .prepare("SELECT * FROM employees WHERE LineUserId = '' AND JobType = ?")
-    .bind(normJobType)
-    .all<Employee>();
+// フリガナが一致し、まだLINEと紐付いていない新入社員を探す。
+// 本人には職種を入力させず、フリガナだけで特定した上で氏名・職種・配属先を画面に表示して確認してもらう方式にしている。
+export async function findUnlinkedEmployeesByKana(db: D1Database, kana: string): Promise<Employee[]> {
+  const { results } = await db.prepare("SELECT * FROM employees WHERE LineUserId = ''").all<Employee>();
   const normKana = normalizeKana(kana);
   return (results ?? []).filter((r) => normalizeKana(r.Kana) === normKana);
 }
@@ -43,11 +41,11 @@ export async function findUnlinkedEmployeesByIdentity(db: D1Database, kana: stri
 export async function saveEmployee(db: D1Database, employee: Employee): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO employees (EmployeeId, Name, Kana, Company, Commute, HireDate, JobType, LineUserId)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO employees (EmployeeId, Name, Kana, Company, Commute, HireDate, JobType, LineUserId, PictureUrl)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(EmployeeId) DO UPDATE SET
          Name=excluded.Name, Kana=excluded.Kana, Company=excluded.Company, Commute=excluded.Commute,
-         HireDate=excluded.HireDate, JobType=excluded.JobType, LineUserId=excluded.LineUserId`
+         HireDate=excluded.HireDate, JobType=excluded.JobType, LineUserId=excluded.LineUserId, PictureUrl=excluded.PictureUrl`
     )
     .bind(
       employee.EmployeeId,
@@ -57,7 +55,8 @@ export async function saveEmployee(db: D1Database, employee: Employee): Promise<
       employee.Commute ?? '',
       employee.HireDate ?? '',
       employee.JobType ?? '',
-      employee.LineUserId ?? ''
+      employee.LineUserId ?? '',
+      employee.PictureUrl ?? ''
     )
     .run();
 }
@@ -79,6 +78,15 @@ export async function saveEmployees(db: D1Database, employees: Employee[]): Prom
 export async function listEmployees(db: D1Database): Promise<Employee[]> {
   const { results } = await db.prepare('SELECT * FROM employees ORDER BY EmployeeId').all<Employee>();
   return results ?? [];
+}
+
+// テスト登録などを取り消すための削除。提出物・履歴も合わせて削除する(孤立データを残さないため)
+export async function deleteEmployee(db: D1Database, employeeId: string): Promise<void> {
+  await db.batch([
+    db.prepare('DELETE FROM submissions WHERE EmployeeId = ?').bind(employeeId),
+    db.prepare('DELETE FROM submission_history WHERE EmployeeId = ?').bind(employeeId),
+    db.prepare('DELETE FROM employees WHERE EmployeeId = ?').bind(employeeId)
+  ]);
 }
 
 export async function bulkSetHireDate(db: D1Database, hireDate: string): Promise<number> {
