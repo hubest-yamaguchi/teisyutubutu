@@ -1,5 +1,43 @@
 # 変更履歴
 
+## 2026-08-29（続き3） — Drive連携のセットアップ進捗とサービスアカウントキー発行のブロック
+
+コード実装(前セクション)を本番へ反映し、Google Cloud/Drive側の設定を進めた。現時点の状態を記録しておく。
+
+### 完了した作業
+
+- マイグレーション`0006_drive_sync.sql`を本番D1に適用済み(`npm run db:migrate:remote`)
+- コードを本番Workerにデプロイ済み(`npm run deploy`、Version ID: `217b0eb1-8f6a-47f4-819b-f9b9b18cdbd1`)
+- GCPプロジェクト作成: `onboarding-documents-507009`(組織: hubest.jp、組織ID `177679363078`)
+- Drive API有効化済み
+- サービスアカウント作成済み: `teisyutubutu-drive-sync@onboarding-documents-507009.iam.gserviceaccount.com`
+- Driveフォルダ作成・共有済み: マイドライブ内「提出書類」フォルダ(ID: `1NIAcTa6g7cBE62Q_etwYisVwXIWe6Keb`)を上記サービスアカウントに編集者権限で共有
+- 管理画面の「Google Drive連携設定」に保存先フォルダIDを登録済み(本番settingsテーブルで確認済み)
+- 動作確認用に承認済み書類を持つ社員が既に2名いることを確認済み(`E0004`山口美玲奈、`E0002`飯森航大、各1件)
+
+### ブロック中: サービスアカウントキー(JSON鍵)の発行
+
+- 組織ポリシー`iam.disableServiceAccountKeyCreation`により、`onboarding-documents-507009`プロジェクトでのサービスアカウントキー作成がブロックされている
+- IT管理者に、組織全体ではなく`onboarding-documents-507009`プロジェクト単位でのポリシー例外設定を依頼中
+- 解除・JSON鍵発行後に必要な残り作業:
+  1. `wrangler secret put GOOGLE_SERVICE_ACCOUNT_EMAIL` / `wrangler secret put GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` でWorker secretsを設定
+  2. `E0004`または`E0002`の社員詳細画面で「承認済み書類をDriveに保存」を実行し、Driveにフォルダ・ファイルが作られることを確認
+
+## 2026-08-29（続き2） — 承認済み書類をGoogle Driveへ保存する機能を追加
+
+### 「Driveに保存」ボタンを社員詳細画面に追加
+
+- アップロード時に自動でDriveへコピーするのではなく、書類の確認・承認が完了した後、管理者が明示的に「承認済み書類をDriveに保存」を押した時だけ、その社員の承認済み書類をまとめてDriveへアップロードする方式にした
+- R2(`teisyutubutu-docs`)が正本のまま変わらず、Driveはあくまで承認後の控え・共有用の位置づけ
+- 保存先はDrive上の指定フォルダ配下に `氏名_社員ID` のフォルダを作成(無ければ新規作成)し、ファイル名は `氏名_連番_書類名` とすることで、ファイル単体でも誰の何の書類かわかるようにした(旧gas-app/Drive.gsの命名規則を踏襲)。同名ファイルがあれば上書き
+- 保存日時は `employees.DriveSavedAt` に記録し、画面に「最終保存」として表示する(`migrations/0006_drive_sync.sql`)
+
+### Google Drive連携の認証情報
+
+- サービスアカウントのメールアドレス・秘密鍵(`GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`)は機微度が高いため、他の設定(LINEトークン等)と異なりsettingsテーブルには保存せず、`wrangler secret put`で設定するWorker secretとした(`src/bindings.ts`)
+- 保存先フォルダIDはトークンほど機微ではないため、従来通りsettingsテーブルで管理し、設定画面の新タブ「Google Drive連携設定」(権限カテゴリ`drive`)から変更できるようにした
+- Drive API呼び出しは`googleapis`パッケージを使わず、`src/drive.ts`でサービスアカウントJWTの署名(Web Crypto API)とREST呼び出しを直接実装した(Workers環境で完結させるため)
+
 ## 2026-08-29（続き） — ドラッグ並び替えの不具合修正、差し戻しのまとめ送信、通知ログ、管理者通知の廃止
 
 ### 設定画面のドラッグ並び替えが効かない不具合を修正

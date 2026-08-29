@@ -5,7 +5,8 @@
 export const SETTINGS_KEYS = {
   LINE_CHANNEL_ACCESS_TOKEN: 'LINE_CHANNEL_ACCESS_TOKEN',
   LIFF_CHANNEL_ID: 'LIFF_CHANNEL_ID',
-  SETTINGS_TAB_ORDER: 'SETTINGS_TAB_ORDER'
+  SETTINGS_TAB_ORDER: 'SETTINGS_TAB_ORDER',
+  DRIVE_ROOT_FOLDER_ID: 'DRIVE_ROOT_FOLDER_ID'
 } as const;
 
 export async function getSetting(db: D1Database, key: string): Promise<string> {

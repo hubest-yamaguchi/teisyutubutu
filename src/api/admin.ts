@@ -13,6 +13,7 @@ import {
   nextEmployeeIds,
   bulkSetHireDate,
   deleteEmployee,
+  markDriveSaved,
   Employee
 } from '../db/employees';
 import { getSubmissionsMap, getAllSubmissions, upsertSubmission } from '../db/submissions';
@@ -38,8 +39,10 @@ import {
 import { listRecentNotifications } from '../db/notifications';
 import { getSetting, setSetting, setSettings, SETTINGS_KEYS } from '../db/settings';
 import { notifyEmployee } from '../line';
-import { todayStr } from '../util/date';
+import { todayStr, nowStr } from '../util/date';
 import { SettingsCategory, SETTINGS_CATEGORIES, sanitizePermissions } from '../permissions';
+import { getEmployeeFile } from '../r2';
+import { getDriveAccessToken, ensureEmployeeFolder, uploadFileToDrive } from '../drive';
 
 class ApiError extends Error {}
 
@@ -77,7 +80,8 @@ function publicEmployee(employee: Employee) {
     company: employee.Company,
     commute: employee.Commute,
     hireDate: employee.HireDate,
-    pictureUrl: employee.PictureUrl || ''
+    pictureUrl: employee.PictureUrl || '',
+    driveSavedAt: employee.DriveSavedAt || ''
   };
 }
 
@@ -237,6 +241,48 @@ export async function adminGetFileInfo(env: Env, email: string, employeeId: stri
   return { key: sub.StorageKey, mimeType: sub.MimeType || 'application/octet-stream' };
 }
 
+// 承認済み書類を社員単位でまとめてGoogle Driveへ保存する(アップロード時の自動保存ではなく、管理者がこの操作を
+// 選択した時だけ実行する)。フォルダ名・ファイル名に氏名/社員ID/書類名を含めることで、ファイル単体でも
+// 「誰の・どの書類か」がわかるようにする(旧gas-app/Drive.gsの命名規則を踏襲)。
+export async function adminSaveToDrive(env: Env, email: string, employeeId: string) {
+  await requireAdmin(env, email);
+  const employee = await findEmployeeById(env.DB, employeeId);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+
+  const rootFolderId = await getSetting(env.DB, SETTINGS_KEYS.DRIVE_ROOT_FOLDER_ID);
+  if (!rootFolderId) throw new ApiError('Driveの保存先フォルダが未設定です（設定 > Google Drive連携設定で指定してください）');
+
+  const docTypes = await loadDocTypes(env.DB);
+  const subs = await getSubmissionsMap(env.DB, employeeId);
+  const targets = applicableDocTypes(employee, docTypes).filter(
+    (d) => subs[d.key]?.Status === STATUS.APPROVED && subs[d.key]?.StorageKey
+  );
+  if (!targets.length) throw new ApiError('Driveに保存できる承認済み書類がありません');
+
+  const accessToken = await getDriveAccessToken(env);
+  const folderName = `${employee.Name}_${employee.EmployeeId}`;
+  const folderId = await ensureEmployeeFolder(accessToken, rootFolderId, folderName);
+
+  let savedCount = 0;
+  for (let i = 0; i < targets.length; i++) {
+    const d = targets[i];
+    const sub = subs[d.key];
+    const obj = await getEmployeeFile(env.DOCS, sub.StorageKey);
+    if (!obj) continue;
+    const extMatch = sub.StorageKey.match(/\.([^./]+)$/);
+    const ext = extMatch ? `.${extMatch[1]}` : '';
+    const fileName = `${employee.Name}_${i + 1}_${d.label}${ext}`;
+    await uploadFileToDrive(accessToken, folderId, fileName, sub.MimeType || 'application/octet-stream', await obj.arrayBuffer());
+    savedCount++;
+  }
+  if (!savedCount) throw new ApiError('保存対象のファイル実体が見つかりませんでした');
+
+  const timestamp = nowStr();
+  await markDriveSaved(env.DB, employeeId, timestamp);
+  await appendHistory(env.DB, employeeId, '', 'Drive保存', `承認済み書類${savedCount}件をDriveに保存`, email);
+  return adminGetEmployeeDetail(env, email, employeeId);
+}
+
 export async function adminListNotifications(env: Env, email: string) {
   await requireAdmin(env, email);
   return listRecentNotifications(env.DB, 100);
@@ -272,6 +318,7 @@ export async function settingsGet(env: Env, email: string) {
     tabOrder: await getTabOrder(env.DB),
     lineChannelAccessTokenMasked: token ? `設定済み（末尾: …${token.slice(-4)}）` : '未設定',
     liffChannelId: await getSetting(env.DB, SETTINGS_KEYS.LIFF_CHANNEL_ID),
+    driveRootFolderId: await getSetting(env.DB, SETTINGS_KEYS.DRIVE_ROOT_FOLDER_ID),
     admins,
     rejectTemplates: await listTemplates(env.DB, 'reject'),
     reminderTemplates: await listTemplates(env.DB, 'reminder'),
@@ -431,6 +478,15 @@ export async function settingsSaveLineChannel(env: Env, email: string, liffChann
     [SETTINGS_KEYS.LIFF_CHANNEL_ID]: liffChannelId || '',
     ...(token ? { [SETTINGS_KEYS.LINE_CHANNEL_ACCESS_TOKEN]: token } : {})
   });
+  return settingsGet(env, email);
+}
+
+// ---------- Google Drive連携設定 ----------
+// サービスアカウントの秘密鍵はここでは扱わない(wrangler secretで別途設定)。ここは保存先フォルダIDのみ。
+
+export async function settingsSaveDriveConfig(env: Env, email: string, rootFolderId: string) {
+  await requirePermission(env, email, 'drive');
+  await setSetting(env.DB, SETTINGS_KEYS.DRIVE_ROOT_FOLDER_ID, (rootFolderId || '').trim());
   return settingsGet(env, email);
 }
 

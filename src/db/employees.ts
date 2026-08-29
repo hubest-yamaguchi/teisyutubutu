@@ -10,6 +10,7 @@ export type Employee = {
   JobType: string;
   LineUserId: string;
   PictureUrl?: string;
+  DriveSavedAt?: string;
 };
 
 export async function findEmployeeById(db: D1Database, employeeId: string): Promise<Employee | null> {
@@ -87,6 +88,10 @@ export async function deleteEmployee(db: D1Database, employeeId: string): Promis
     db.prepare('DELETE FROM submission_history WHERE EmployeeId = ?').bind(employeeId),
     db.prepare('DELETE FROM employees WHERE EmployeeId = ?').bind(employeeId)
   ]);
+}
+
+export async function markDriveSaved(db: D1Database, employeeId: string, timestamp: string): Promise<void> {
+  await db.prepare('UPDATE employees SET DriveSavedAt = ? WHERE EmployeeId = ?').bind(timestamp, employeeId).run();
 }
 
 export async function bulkSetHireDate(db: D1Database, hireDate: string): Promise<number> {

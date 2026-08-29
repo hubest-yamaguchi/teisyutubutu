@@ -459,6 +459,10 @@
         '<span class="muted" id="batchCount"></span>' +
         '<button class="btn danger" onclick="sendBatchReject()">選択した書類をまとめて差し戻す</button>' +
         '</div>' +
+        '<hr><h3>Google Driveへの保存</h3>' +
+        '<p class="muted">承認済みの書類をまとめて、社員ごとのDriveフォルダに保存します（アップロード時の自動保存ではなく、押した時だけ実行されます）。</p>' +
+        (e.driveSavedAt ? '<p class="muted">最終保存: ' + e.driveSavedAt + '</p>' : '') +
+        '<button class="btn ghost" onclick="saveToDrive()">承認済み書類をDriveに保存</button>' +
         '<hr><h3>リマインダー送信</h3>' +
         '<div class="row-flex" id="reminderTpl"></div>' +
         '<textarea id="reminderText" rows="3" placeholder="送信内容"></textarea>' +
@@ -538,10 +542,18 @@
       callServer_('adminApproveDoc', [CURRENT_DETAIL_ID, docKey]).then(function () { loadDashboard(); }).catch(showError);
     }
 
+    function saveToDrive() {
+      callServer_('adminSaveToDrive', [CURRENT_DETAIL_ID]).then(function () {
+        showToast('Driveに保存しました');
+        loadDashboard();
+      }).catch(showError);
+    }
+
     // ---------- 設定ページ(サイドタブ) ----------
     var CATEGORY_LABELS = {
       emp: '新入社員登録', tpl: 'テンプレート', job: '職種法人マスタ',
-      admin: '管理者一覧', line: 'LINE公式アカウント設定', doc: '書類マスタ', setup: '初期データ投入'
+      admin: '管理者一覧', line: 'LINE公式アカウント設定', doc: '書類マスタ',
+      drive: 'Google Drive連携設定', setup: '初期データ投入'
     };
     var CURRENT_SETTINGS_TAB = null;
 
@@ -865,6 +877,16 @@
         '<div id="notifLog" style="margin-top:10px;"><p class="muted">「更新」を押すと表示されます</p></div></div>'
       );
 
+      // Google Drive連携設定
+      if (cat === 'drive') return (
+        '<div class="card"><h2>Google Drive連携設定</h2>' +
+        '<p class="muted">承認済み書類を「Driveに保存」した際の保存先フォルダ(社員ごとのサブフォルダをこの中に作成します)。' +
+        'サービスアカウントの認証情報は機微情報のためこの画面では扱わず、サーバー側にWorker secretとして別途設定します。</p>' +
+        '<label class="muted">保存先フォルダID</label>' +
+        '<input type="text" id="driveRootFolderId" value="' + escAttr(s.driveRootFolderId || '') + '" placeholder="DriveフォルダのURLに含まれるID">' +
+        '<div style="height:8px;"></div><button class="btn" onclick="saveDriveConfig()">保存</button></div>'
+      );
+
       // 書類マスタ(旧: スプレッドシート直接編集)。ドラッグで並び替え可能
       if (cat === 'doc') return (
         '<div class="card"><h2>書類マスタ</h2>' +
@@ -928,6 +950,11 @@
 
     function saveLineChannel() {
       callServer_('settingsSaveLineChannel', [document.getElementById('liffChannelId').value.trim(), document.getElementById('lineToken').value.trim()])
+        .then(renderSettingsAndToast_).catch(showError);
+    }
+
+    function saveDriveConfig() {
+      callServer_('settingsSaveDriveConfig', [document.getElementById('driveRootFolderId').value.trim()])
         .then(renderSettingsAndToast_).catch(showError);
     }
 
