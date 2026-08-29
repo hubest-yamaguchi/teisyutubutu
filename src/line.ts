@@ -2,8 +2,7 @@
 
 import { getSetting } from './db/settings';
 import { SETTINGS_KEYS } from './db/settings';
-import { listAdmins } from './db/admins';
-import { logNotifications, buildNotificationLogRow, SendResult, NotificationDirection } from './db/notifications';
+import { logNotifications, buildNotificationLogRow, SendResult } from './db/notifications';
 
 type NotificationRequest = { url: string; method: 'POST'; headers: Record<string, string>; body: string };
 type BuiltNotification = { skip: string } | { request: NotificationRequest };
@@ -36,23 +35,10 @@ async function sendNotification(db: D1Database, lineUserId: string, message: str
   return sendRequest(built.request);
 }
 
-// 本人(新入社員)への通知
+// 本人(新入社員)への通知。管理者への「提出がありました」通知は行わない方針のため、
+// LINE通知は「差し戻し」「リマインダー」など、こちらから本人へ送る場合のみ使う。
 export async function notifyEmployee(db: D1Database, employee: { EmployeeId: string; LineUserId: string }, message: string): Promise<SendResult> {
   const result = await sendNotification(db, employee.LineUserId, message);
   await logNotifications(db, [buildNotificationLogRow('to_employee', employee.EmployeeId, '', message, result)]);
   return result;
-}
-
-// 管理者への通知。Adminsの全員に並列で個別送信する(notifyAllAdmins_と同じ)
-export async function notifyAllAdmins(db: D1Database, message: string): Promise<void> {
-  const admins = await listAdmins(db);
-  if (!admins.length) return;
-
-  const built = await Promise.all(admins.map((a) => buildNotificationRequest(db, a.LineUserId, message)));
-  const results: SendResult[] = await Promise.all(
-    built.map((b) => ('skip' in b ? Promise.resolve<SendResult>({ sent: false, reason: b.skip }) : sendRequest(b.request)))
-  );
-
-  const rows = admins.map((a, i) => buildNotificationLogRow('to_admin' as NotificationDirection, '', a.AdminId, message, results[i]));
-  await logNotifications(db, rows);
 }

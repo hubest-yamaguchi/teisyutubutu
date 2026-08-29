@@ -8,7 +8,6 @@ import { getSubmissionsMap, upsertSubmission } from '../db/submissions';
 import { appendHistory } from '../db/history';
 import { loadDocTypes } from '../db/docConfig';
 import { saveEmployeeFile } from '../r2';
-import { notifyAllAdmins } from '../line';
 import { getSetting } from '../db/settings';
 import { SETTINGS_KEYS } from '../db/settings';
 import { todayStr } from '../util/date';
@@ -205,7 +204,6 @@ export async function submitDocument(
     MimeType: mimeType
   });
   await appendHistory(env.DB, eid, docKey, '提出', `${meta.label}を提出`, '');
-  await notifyAllAdmins(env.DB, `${employee.Name}さんが「${meta.label}」を提出しました。`);
 
   const payload = await buildDocumentsPayload(env.DB, employee);
   payload.ok = true;

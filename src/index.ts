@@ -144,7 +144,7 @@ const ADMIN_FUNCTIONS: Record<string, (env: Env, email: string, ...args: any[]) 
   adminGetDashboard: adminApi.adminGetDashboard,
   adminGetEmployeeDetail: adminApi.adminGetEmployeeDetail,
   adminApproveDoc: adminApi.adminApproveDoc,
-  adminRejectDoc: adminApi.adminRejectDoc,
+  adminRejectDocsBatch: adminApi.adminRejectDocsBatch,
   adminToggleOriginalReceived: adminApi.adminToggleOriginalReceived,
   adminSendReminder: adminApi.adminSendReminder,
   adminDeleteMyNumber: adminApi.adminDeleteMyNumber,

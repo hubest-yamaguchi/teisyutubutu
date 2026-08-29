@@ -170,16 +170,26 @@ export async function adminApproveDoc(env: Env, email: string, employeeId: strin
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 
-export async function adminRejectDoc(env: Env, email: string, employeeId: string, docKey: string, reason: string) {
+// 複数の書類を選んでまとめて差し戻す。LINEの無料プランには月間送信数の上限があるため、
+// 書類ごとに個別送信していたのを、1回の操作につき通知1通にまとめられるようにしたもの。
+export async function adminRejectDocsBatch(env: Env, email: string, employeeId: string, items: { docKey: string; reason: string }[]) {
   await requireAdmin(env, email);
   const employee = await findEmployeeById(env.DB, employeeId);
   if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  if (!items || !items.length) throw new ApiError('差し戻す書類を選択してください');
+
   const docTypes = await loadDocTypes(env.DB);
-  const meta = docTypes.find((d) => d.key === docKey);
-  if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
-  await upsertSubmission(env.DB, employeeId, docKey, { Status: STATUS.REJECTED, RejectReason: reason, RejectedAt: todayStr() });
-  await appendHistory(env.DB, employeeId, docKey, '差し戻し', reason, email);
-  await notifyEmployee(env.DB, employee, `${meta.label}について差し戻しがありました。理由：${reason}`);
+  const lines: string[] = [];
+  for (const item of items) {
+    const meta = docTypes.find((d) => d.key === item.docKey);
+    if (!meta) throw new ApiError(`不明な書類種別です: ${item.docKey}`);
+    const reason = String(item.reason || '').trim();
+    if (!reason) throw new ApiError(`${meta.label}の差し戻し理由を入力してください`);
+    await upsertSubmission(env.DB, employeeId, item.docKey, { Status: STATUS.REJECTED, RejectReason: reason, RejectedAt: todayStr() });
+    await appendHistory(env.DB, employeeId, item.docKey, '差し戻し', reason, email);
+    lines.push(`・${meta.label}\n${reason}`);
+  }
+  await notifyEmployee(env.DB, employee, `以下の書類について差し戻しがあります。\n\n${lines.join('\n\n')}`);
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 
