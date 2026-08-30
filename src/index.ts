@@ -157,6 +157,7 @@ const ADMIN_FUNCTIONS: Record<string, (env: Env, email: string, ...args: any[]) 
   settingsAddEmployee: adminApi.settingsAddEmployee,
   settingsBulkAddEmployees: adminApi.settingsBulkAddEmployees,
   settingsBulkSetHireDate: adminApi.settingsBulkSetHireDate,
+  settingsUpdateEmployee: adminApi.settingsUpdateEmployee,
   settingsRemoveEmployee: adminApi.settingsRemoveEmployee,
   settingsAddTemplate: adminApi.settingsAddTemplate,
   settingsRemoveTemplate: adminApi.settingsRemoveTemplate,

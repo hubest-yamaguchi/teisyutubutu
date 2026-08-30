@@ -42,7 +42,7 @@ import { notifyEmployee } from '../line';
 import { todayStr, nowStr } from '../util/date';
 import { SettingsCategory, SETTINGS_CATEGORIES, sanitizePermissions } from '../permissions';
 import { getEmployeeFile } from '../r2';
-import { getDriveAccessToken, ensureEmployeeFolder, uploadFileToDrive } from '../drive';
+import { getDriveAccessToken, ensureFolder, uploadFileToDrive } from '../drive';
 
 class ApiError extends Error {}
 
@@ -242,8 +242,9 @@ export async function adminGetFileInfo(env: Env, email: string, employeeId: stri
 }
 
 // 承認済み書類を社員単位でまとめてGoogle Driveへ保存する(アップロード時の自動保存ではなく、管理者がこの操作を
-// 選択した時だけ実行する)。フォルダ名・ファイル名に氏名/社員ID/書類名を含めることで、ファイル単体でも
-// 「誰の・どの書類か」がわかるようにする(旧gas-app/Drive.gsの命名規則を踏襲)。
+// 選択した時だけ実行する)。保存先フォルダは「{入社年度}卒/{氏名}_{社員ID}/」の2階層にし、
+// ファイル名にも氏名・書類名を含めることで、ファイル単体でも「誰の・いつの・どの書類か」がわかるようにする
+// (社員フォルダ以下の命名規則は旧gas-app/Drive.gsを踏襲)。
 export async function adminSaveToDrive(env: Env, email: string, employeeId: string) {
   await requireAdmin(env, email);
   const employee = await findEmployeeById(env.DB, employeeId);
@@ -260,8 +261,11 @@ export async function adminSaveToDrive(env: Env, email: string, employeeId: stri
   if (!targets.length) throw new ApiError('Driveに保存できる承認済み書類がありません');
 
   const accessToken = await getDriveAccessToken(env);
+  const yearMatch = employee.HireDate.match(/^(\d{4})/);
+  const yearFolderName = yearMatch ? `${yearMatch[1]}卒` : '入社年度未設定';
+  const yearFolderId = await ensureFolder(accessToken, rootFolderId, yearFolderName);
   const folderName = `${employee.Name}_${employee.EmployeeId}`;
-  const folderId = await ensureEmployeeFolder(accessToken, rootFolderId, folderName);
+  const folderId = await ensureFolder(accessToken, yearFolderId, folderName);
 
   let savedCount = 0;
   for (let i = 0; i < targets.length; i++) {
@@ -330,6 +334,7 @@ export async function settingsGet(env: Env, email: string) {
       kana: e.Kana,
       jobType: e.JobType,
       company: e.Company,
+      hireDate: e.HireDate,
       linked: !!e.LineUserId
     })),
     companies: COMPANIES,
@@ -355,6 +360,36 @@ export async function settingsAddEmployee(env: Env, email: string, name: string,
     LineUserId: ''
   });
   return { employeeId: id };
+}
+
+// 氏名・フリガナ・職種・入社予定日を社員ごとに個別編集する(一括設定と異なり、この社員だけを更新する)。
+// 職種を変更した場合は、confirmBind時と同じロジックで配属先(Company)も職種法人マスタから再算出する。
+export async function settingsUpdateEmployee(
+  env: Env,
+  email: string,
+  employeeId: string,
+  name: string,
+  kana: string,
+  jobType: string,
+  hireDate: string
+) {
+  await requirePermission(env, email, 'emp');
+  const existing = await findEmployeeById(env.DB, employeeId);
+  if (!existing) throw new ApiError('新入社員情報が見つかりません');
+  if (!name || !String(name).trim()) throw new ApiError('氏名を入力してください');
+  if (!jobType || !String(jobType).trim()) throw new ApiError('職種を入力してください（本人確認・配属先の自動決定に使用します）');
+
+  const trimmedJobType = String(jobType).trim();
+  const companyMap = await getJobTypeCompanyMap(env.DB);
+  await saveEmployee(env.DB, {
+    ...existing,
+    Name: String(name).trim(),
+    Kana: (kana || '').toString().trim(),
+    JobType: trimmedJobType,
+    Company: companyMap[trimmedJobType] || existing.Company,
+    HireDate: (hireDate || '').toString().trim()
+  });
+  return settingsGet(env, email);
 }
 
 type BulkEmployeeRow = { 氏名?: string; Name?: string; フリガナ?: string; Kana?: string; 職種?: string; JobType?: string };

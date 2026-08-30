@@ -62,6 +62,8 @@
     button.btn.approve { background:#3F9142; }
     button.btn.danger { background:#C1443A; }
     button.btn.ghost { background:#E7EAF2; color:#3A4E75; }
+    button.btn.pending { background:#C4CCC9; color:#5B6560; cursor:not-allowed; }
+    button.btn:disabled { cursor:not-allowed; }
     .doc-row { border:1px solid #DBE1DF; border-radius:10px; padding:10px 12px; margin-bottom:8px; }
     .muted { color:#8A9490; font-size:.8rem; }
     .row-flex { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
@@ -461,8 +463,8 @@
         '</div>' +
         '<hr><h3>Google Driveへの保存</h3>' +
         '<p class="muted">承認済みの書類をまとめて、社員ごとのDriveフォルダに保存します（アップロード時の自動保存ではなく、押した時だけ実行されます）。</p>' +
-        (e.driveSavedAt ? '<p class="muted">最終保存: ' + e.driveSavedAt + '</p>' : '') +
-        '<button class="btn ghost" onclick="saveToDrive()">承認済み書類をDriveに保存</button>' +
+        (e.driveSavedAt ? '<p><span class="status-pill" style="background:#E9F5EA;color:#3F9142;">Drive保存済み ' + e.driveSavedAt + '</span></p>' : '') +
+        '<button class="btn ghost" id="driveSaveBtn" onclick="saveToDrive()">承認済み書類をDriveに保存</button>' +
         '<hr><h3>リマインダー送信</h3>' +
         '<div class="row-flex" id="reminderTpl"></div>' +
         '<textarea id="reminderText" rows="3" placeholder="送信内容"></textarea>' +
@@ -543,10 +545,30 @@
     }
 
     function saveToDrive() {
+      var btn = document.getElementById('driveSaveBtn');
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.remove('ghost', 'approve', 'danger');
+        btn.classList.add('pending');
+        btn.textContent = '保存中…';
+      }
       callServer_('adminSaveToDrive', [CURRENT_DETAIL_ID]).then(function () {
+        if (btn) {
+          btn.classList.remove('pending');
+          btn.classList.add('approve');
+          btn.textContent = '保存しました ✓';
+        }
         showToast('Driveに保存しました');
-        loadDashboard();
-      }).catch(showError);
+        setTimeout(function () { loadDashboard(); }, 900);
+      }).catch(function (err) {
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('pending');
+          btn.classList.add('danger');
+          btn.textContent = '保存に失敗しました（再試行）';
+        }
+        showError(err);
+      });
     }
 
     // ---------- 設定ページ(サイドタブ) ----------
@@ -806,13 +828,26 @@
         '<div id="bulkHireDateResult" class="muted" style="margin-top:8px;"></div>' +
         '</div>' +
         '<div class="card"><h2>登録済みの新入社員一覧</h2>' +
-        '<p class="muted">テスト登録などを取り消したい場合は「削除」してください（提出済みの書類・履歴も一緒に削除されます）。</p>' +
-        '<table><thead><tr><th>氏名</th><th>フリガナ</th><th>職種</th><th>配属先</th><th>LINE連携</th><th></th></tr></thead><tbody>' +
+        '<p class="muted">氏名・フリガナ・職種・入社予定日は「編集」から社員ごとに個別修正できます。テスト登録などを取り消したい場合は「削除」してください（提出済みの書類・履歴も一緒に削除されます）。</p>' +
+        '<table><thead><tr><th>氏名</th><th>フリガナ</th><th>職種</th><th>配属先</th><th>入社予定日</th><th>LINE連携</th><th></th></tr></thead><tbody>' +
         (s.employees.length ? s.employees.map(function (emp) {
           return '<tr><td>' + emp.name + '</td><td>' + emp.kana + '</td><td>' + (emp.jobType || '-') + '</td><td>' + (emp.company || '未回答') + '</td>' +
+            '<td>' + (emp.hireDate || '未設定') + '</td>' +
             '<td>' + (emp.linked ? '連携済み' : '未連携') + '</td>' +
-            '<td><button class="btn danger" onclick="removeEmployee(\'' + emp.id + '\',\'' + escAttr(emp.name) + '\')">削除</button></td></tr>';
-        }).join('') : '<tr><td colspan="6" class="muted">まだ登録されていません</td></tr>') +
+            '<td><button class="btn ghost" onclick="toggleEditEmployee(\'' + emp.id + '\')">編集</button> ' +
+            '<button class="btn danger" onclick="removeEmployee(\'' + emp.id + '\',\'' + escAttr(emp.name) + '\')">削除</button></td></tr>' +
+            '<tr id="editEmp-' + emp.id + '" style="display:none;"><td colspan="7">' +
+            '<div class="row-flex">' +
+            '<input type="text" id="editEmpName-' + emp.id + '" value="' + escAttr(emp.name) + '" placeholder="氏名" style="width:120px;">' +
+            '<input type="text" id="editEmpKana-' + emp.id + '" value="' + escAttr(emp.kana) + '" placeholder="フリガナ" style="width:120px;">' +
+            '<select id="editEmpJobType-' + emp.id + '" style="width:160px;">' +
+            Object.keys(s.jobTypeCompanyMap).map(function (j) { return '<option value="' + escAttr(j) + '"' + (j === emp.jobType ? ' selected' : '') + '>' + j + '</option>'; }).join('') +
+            '</select>' +
+            '<input type="date" id="editEmpHireDate-' + emp.id + '" value="' + escAttr(emp.hireDate || '') + '" style="width:160px;">' +
+            '</div>' +
+            '<div style="height:8px;"></div><button class="btn" onclick="saveEmployeeEdit(\'' + emp.id + '\')">この内容で保存</button>' +
+            '</td></tr>';
+        }).join('') : '<tr><td colspan="7" class="muted">まだ登録されていません</td></tr>') +
         '</tbody></table></div>'
       );
 
@@ -880,7 +915,7 @@
       // Google Drive連携設定
       if (cat === 'drive') return (
         '<div class="card"><h2>Google Drive連携設定</h2>' +
-        '<p class="muted">承認済み書類を「Driveに保存」した際の保存先フォルダ(社員ごとのサブフォルダをこの中に作成します)。' +
+        '<p class="muted">承認済み書類を「Driveに保存」した際の保存先フォルダ(この中に「入社年度卒」→「氏名_社員ID」の順でサブフォルダを自動作成します)。' +
         'サービスアカウントの認証情報は機微情報のためこの画面では扱わず、サーバー側にWorker secretとして別途設定します。</p>' +
         '<label class="muted">保存先フォルダID</label>' +
         '<input type="text" id="driveRootFolderId" value="' + escAttr(s.driveRootFolderId || '') + '" placeholder="DriveフォルダのURLに含まれるID">' +
@@ -1030,6 +1065,21 @@
       callServer_('settingsBulkSetHireDate', [date]).then(function (res) {
         resultEl.textContent = res.updated + '件に設定しました。';
       }).catch(showError);
+    }
+
+    function toggleEditEmployee(id) {
+      var row = document.getElementById('editEmp-' + id);
+      row.style.display = row.style.display === 'none' ? '' : 'none';
+    }
+
+    function saveEmployeeEdit(id) {
+      callServer_('settingsUpdateEmployee', [
+        id,
+        document.getElementById('editEmpName-' + id).value.trim(),
+        document.getElementById('editEmpKana-' + id).value.trim(),
+        document.getElementById('editEmpJobType-' + id).value,
+        document.getElementById('editEmpHireDate-' + id).value
+      ]).then(renderSettingsAndToast_).catch(showError);
     }
 
     function removeEmployee(id, name) {

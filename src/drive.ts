@@ -66,15 +66,16 @@ async function findChildByName(accessToken: string, parentId: string, name: stri
   return data.files?.[0]?.id ?? null;
 }
 
-// 社員ごとのフォルダを取得、無ければ作成する(旧gas-app/Drive.gsのgetOrCreateEmployeeFolder_と同じ考え方)。
-export async function ensureEmployeeFolder(accessToken: string, rootFolderId: string, folderName: string): Promise<string> {
-  const existing = await findChildByName(accessToken, rootFolderId, folderName, 'application/vnd.google-apps.folder');
+// 指定フォルダ直下の子フォルダを取得、無ければ作成する(旧gas-app/Drive.gsのgetOrCreateEmployeeFolder_と同じ考え方)。
+// 年度フォルダ・社員フォルダのどちらの階層を作る際にも使う汎用関数。
+export async function ensureFolder(accessToken: string, parentFolderId: string, folderName: string): Promise<string> {
+  const existing = await findChildByName(accessToken, parentFolderId, folderName, 'application/vnd.google-apps.folder');
   if (existing) return existing;
 
   const res = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: folderName, mimeType: 'application/vnd.google-apps.folder', parents: [rootFolderId] })
+    body: JSON.stringify({ name: folderName, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] })
   });
   if (!res.ok) throw new Error(`Driveフォルダの作成に失敗しました: ${await res.text()}`);
   const data = await res.json<{ id: string }>();
