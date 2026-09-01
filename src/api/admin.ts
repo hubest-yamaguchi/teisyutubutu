@@ -42,7 +42,7 @@ import { notifyEmployee } from '../line';
 import { todayStr, nowStr } from '../util/date';
 import { SettingsCategory, SETTINGS_CATEGORIES, sanitizePermissions } from '../permissions';
 import { getEmployeeFile } from '../r2';
-import { getDriveAccessToken, ensureFolder, uploadFileToDrive } from '../drive';
+import { getDriveAccessToken, ensureFolder, uploadFileToDrive, syncFolderPermissions } from '../drive';
 
 class ApiError extends Error {}
 
@@ -241,10 +241,28 @@ export async function adminGetFileInfo(env: Env, email: string, employeeId: stri
   return { key: sub.StorageKey, mimeType: sub.MimeType || 'application/octet-stream' };
 }
 
+// 法人ごとのマイナンバー閲覧権限(admin.MyNumberCompanies)を、その法人フォルダのDrive閲覧権限として
+// 反映する対象を決める。誰も割り当てられていない法人は、代表管理者相当('admin'権限を持つ管理者)にのみ見せる。
+function resolveCompanyFolderTargetEmails(admins: Awaited<ReturnType<typeof listAdmins>>, company: string): string[] {
+  const withMyNumber = admins.filter((a) => a.MyNumberCompanies.includes(company)).map((a) => a.Email);
+  if (withMyNumber.length) return withMyNumber;
+  return admins.filter((a) => a.Permissions.includes('admin')).map((a) => a.Email);
+}
+
+async function ensureCompanyFolder(accessToken: string, rootFolderId: string, admins: Awaited<ReturnType<typeof listAdmins>>, company: string) {
+  const companyFolderId = await ensureFolder(accessToken, rootFolderId, company || '配属先未設定');
+  await syncFolderPermissions(accessToken, companyFolderId, resolveCompanyFolderTargetEmails(admins, company));
+  return companyFolderId;
+}
+
 // 承認済み書類を社員単位でまとめてGoogle Driveへ保存する(アップロード時の自動保存ではなく、管理者がこの操作を
-// 選択した時だけ実行する)。保存先フォルダは「{入社年度}卒/{氏名}_{社員ID}/」の2階層にし、
+// 選択した時だけ実行する)。保存先フォルダは「{法人名}/{入社年度}卒/{氏名}_{社員ID}/」の3階層にし、
 // ファイル名にも氏名・書類名を含めることで、ファイル単体でも「誰の・いつの・どの書類か」がわかるようにする
 // (社員フォルダ以下の命名規則は旧gas-app/Drive.gsを踏襲)。
+// 法人フォルダの閲覧権限は、マイナンバー閲覧権限と同じ管理者だけに絞る(resolveCompanyFolderTargetEmails)。
+// 【重要】この権限同期はフォルダ単位の明示的な共有のみを操作する。共有ドライブ自体の「メンバー」に
+// 追加されている管理者は、この設定に関わらず全フォルダを閲覧できてしまうため、法人単位で本当に絞りたい
+// 場合は、共有ドライブのメンバーからは外し、フォルダ単位の共有だけで運用すること。
 export async function adminSaveToDrive(env: Env, email: string, employeeId: string) {
   await requireAdmin(env, email);
   const employee = await findEmployeeById(env.DB, employeeId);
@@ -261,9 +279,11 @@ export async function adminSaveToDrive(env: Env, email: string, employeeId: stri
   if (!targets.length) throw new ApiError('Driveに保存できる承認済み書類がありません');
 
   const accessToken = await getDriveAccessToken(env);
+  const admins = await listAdmins(env.DB);
+  const companyFolderId = await ensureCompanyFolder(accessToken, rootFolderId, admins, employee.Company);
   const yearMatch = employee.HireDate.match(/^(\d{4})/);
   const yearFolderName = yearMatch ? `${yearMatch[1]}卒` : '入社年度未設定';
-  const yearFolderId = await ensureFolder(accessToken, rootFolderId, yearFolderName);
+  const yearFolderId = await ensureFolder(accessToken, companyFolderId, yearFolderName);
   const folderName = `${employee.Name}_${employee.EmployeeId}`;
   const folderId = await ensureFolder(accessToken, yearFolderId, folderName);
 
@@ -523,6 +543,24 @@ export async function settingsSaveDriveConfig(env: Env, email: string, rootFolde
   await requirePermission(env, email, 'drive');
   await setSetting(env.DB, SETTINGS_KEYS.DRIVE_ROOT_FOLDER_ID, (rootFolderId || '').trim());
   return settingsGet(env, email);
+}
+
+// 管理者一覧のマイナンバー閲覧権限(法人ごと)を変更した後などに、Drive上の法人フォルダの閲覧権限を
+// 今の設定に合わせて手動で揃え直すためのボタン用API。フォルダが無い法人は新規作成する。
+export async function adminSyncDrivePermissions(env: Env, email: string) {
+  await requirePermission(env, email, 'drive');
+  const rootFolderId = await getSetting(env.DB, SETTINGS_KEYS.DRIVE_ROOT_FOLDER_ID);
+  if (!rootFolderId) throw new ApiError('Driveの保存先フォルダが未設定です（設定 > Google Drive連携設定で指定してください）');
+
+  const accessToken = await getDriveAccessToken(env);
+  const admins = await listAdmins(env.DB);
+  const results: { company: string; granted: string[]; revoked: string[] }[] = [];
+  for (const company of COMPANIES) {
+    const companyFolderId = await ensureFolder(accessToken, rootFolderId, company);
+    const diff = await syncFolderPermissions(accessToken, companyFolderId, resolveCompanyFolderTargetEmails(admins, company));
+    results.push({ company, ...diff });
+  }
+  return { results };
 }
 
 // ---------- 書類マスタ(旧: スプレッドシート直接編集 → 新設のCRUD) ----------

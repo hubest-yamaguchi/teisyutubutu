@@ -167,6 +167,7 @@ const ADMIN_FUNCTIONS: Record<string, (env: Env, email: string, ...args: any[]) 
   settingsSaveTabOrder: adminApi.settingsSaveTabOrder,
   settingsSaveLineChannel: adminApi.settingsSaveLineChannel,
   settingsSaveDriveConfig: adminApi.settingsSaveDriveConfig,
+  adminSyncDrivePermissions: adminApi.adminSyncDrivePermissions,
   settingsSaveDocConfig: adminApi.settingsSaveDocConfig,
   settingsRemoveDocConfig: adminApi.settingsRemoveDocConfig,
   settingsReorderDocConfig: adminApi.settingsReorderDocConfig,

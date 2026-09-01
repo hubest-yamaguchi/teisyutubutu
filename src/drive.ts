@@ -82,6 +82,89 @@ export async function ensureFolder(accessToken: string, parentFolderId: string, 
   return data.id;
 }
 
+type DrivePermission = {
+  id: string;
+  emailAddress?: string;
+  role: string;
+  type: string;
+  permissionDetails?: { inherited?: boolean }[];
+};
+
+// 上位階層(共有ドライブのメンバー、親フォルダの共有など)から引き継いだ権限かどうか。
+// 継承された権限はこのフォルダ単体では削除できない(Drive APIがcannotDeletePermissionで拒否する)。
+function isInheritedPermission(p: DrivePermission): boolean {
+  return !!p.permissionDetails && p.permissionDetails.some((d) => d.inherited);
+}
+
+async function listFolderPermissions(accessToken: string, folderId: string): Promise<DrivePermission[]> {
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?fields=permissions(id,emailAddress,role,type,permissionDetails)&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) throw new Error(`Drive権限一覧の取得に失敗しました: ${await res.text()}`);
+  const data = await res.json<{ permissions: DrivePermission[] }>();
+  return data.permissions ?? [];
+}
+
+async function createFolderPermission(accessToken: string, folderId: string, email: string): Promise<void> {
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?supportsAllDrives=true&sendNotificationEmail=false`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'reader', type: 'user', emailAddress: email })
+    }
+  );
+  if (!res.ok) throw new Error(`Driveフォルダの共有に失敗しました(${email}): ${await res.text()}`);
+}
+
+async function deleteFolderPermission(accessToken: string, folderId: string, permissionId: string): Promise<void> {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions/${permissionId}?supportsAllDrives=true`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  if (!res.ok) throw new Error(`Driveフォルダの共有解除に失敗しました: ${await res.text()}`);
+}
+
+/**
+ * フォルダの閲覧権限(role: reader, type: user)を targetEmails だけに揃える。
+ * ・owner権限(サービスアカウント自身)には一切触れない
+ * ・type が user 以外(anyone/domain/groupなど、共有ドライブ全体設定に由来するもの)にも触れない
+ * ・上位階層から継承された権限(共有ドライブのメンバー、親フォルダの共有など)にも触れない
+ *   (このフォルダ単体では削除できず、Drive APIがcannotDeletePermissionで拒否するため。
+ *    これらを本当に外したい場合は、共有ドライブ側で手動対応する必要がある)
+ */
+export async function syncFolderPermissions(
+  accessToken: string,
+  folderId: string,
+  targetEmails: string[]
+): Promise<{ granted: string[]; revoked: string[] }> {
+  const current = await listFolderPermissions(accessToken, folderId);
+  const targetSet = new Set(targetEmails.map((e) => e.toLowerCase()));
+  const managed = current.filter((p) => p.type === 'user' && p.role !== 'owner' && !isInheritedPermission(p));
+
+  const granted: string[] = [];
+  const revoked: string[] = [];
+
+  for (const perm of managed) {
+    const email = (perm.emailAddress || '').toLowerCase();
+    if (!targetSet.has(email)) {
+      await deleteFolderPermission(accessToken, folderId, perm.id);
+      revoked.push(perm.emailAddress || perm.id);
+    }
+  }
+
+  const already = new Set(managed.map((p) => (p.emailAddress || '').toLowerCase()));
+  for (const email of targetEmails) {
+    if (!already.has(email.toLowerCase())) {
+      await createFolderPermission(accessToken, folderId, email);
+      granted.push(email);
+    }
+  }
+
+  return { granted, revoked };
+}
+
 // 同名ファイルが既にあれば削除してから保存する(上書き。旧gas-app/Drive.gsのsaveEmployeeFile_と同じ挙動)。
 export async function uploadFileToDrive(
   accessToken: string,

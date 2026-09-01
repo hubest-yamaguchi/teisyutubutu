@@ -915,11 +915,18 @@
       // Google Drive連携設定
       if (cat === 'drive') return (
         '<div class="card"><h2>Google Drive連携設定</h2>' +
-        '<p class="muted">承認済み書類を「Driveに保存」した際の保存先フォルダ(この中に「入社年度卒」→「氏名_社員ID」の順でサブフォルダを自動作成します)。' +
+        '<p class="muted">承認済み書類を「Driveに保存」した際の保存先フォルダ(この中に「法人名」→「入社年度卒」→「氏名_社員ID」の順でサブフォルダを自動作成します)。' +
         'サービスアカウントの認証情報は機微情報のためこの画面では扱わず、サーバー側にWorker secretとして別途設定します。</p>' +
         '<label class="muted">保存先フォルダID</label>' +
         '<input type="text" id="driveRootFolderId" value="' + escAttr(s.driveRootFolderId || '') + '" placeholder="DriveフォルダのURLに含まれるID">' +
-        '<div style="height:8px;"></div><button class="btn" onclick="saveDriveConfig()">保存</button></div>'
+        '<div style="height:8px;"></div><button class="btn" onclick="saveDriveConfig()">保存</button></div>' +
+        '<div class="card"><h2>法人フォルダの閲覧権限</h2>' +
+        '<p class="muted">各法人のDriveフォルダは、その法人のマイナンバー閲覧権限を持つ管理者(管理者一覧の「マイナンバー閲覧」)だけが開けるようにします。' +
+        'マイナンバー閲覧権限が誰にも設定されていない法人は、「管理者一覧」の編集権限を持つ管理者だけが開けます。' +
+        '管理者一覧の権限を変更した後は、下のボタンで同期し直してください。' +
+        '<br>※共有ドライブ自体の「メンバー」に追加されている人は、この設定に関わらず全法人のフォルダを見られてしまいます。法人ごとに本当に絞りたい場合は、共有ドライブのメンバーからは外し、この画面の共有だけで運用してください。</p>' +
+        '<button class="btn ghost" onclick="syncDrivePermissions()">今すぐ同期</button>' +
+        '<div id="driveSyncResult" style="margin-top:10px;"></div></div>'
       );
 
       // 書類マスタ(旧: スプレッドシート直接編集)。ドラッグで並び替え可能
@@ -991,6 +998,18 @@
     function saveDriveConfig() {
       callServer_('settingsSaveDriveConfig', [document.getElementById('driveRootFolderId').value.trim()])
         .then(renderSettingsAndToast_).catch(showError);
+    }
+
+    function syncDrivePermissions() {
+      var el = document.getElementById('driveSyncResult');
+      el.innerHTML = '<p class="muted">同期中…</p>';
+      callServer_('adminSyncDrivePermissions', []).then(function (res) {
+        el.innerHTML = res.results.map(function (r) {
+          var granted = r.granted.length ? '共有: ' + r.granted.join(', ') : '共有: 変更なし';
+          var revoked = r.revoked.length ? ' / 解除: ' + r.revoked.join(', ') : '';
+          return '<div class="muted" style="margin-top:4px;"><b>' + r.company + '</b> — ' + granted + revoked + '</div>';
+        }).join('');
+      }).catch(showError);
     }
 
     function loadNotifLog_() {
