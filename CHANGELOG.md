@@ -1,5 +1,37 @@
 # 変更履歴
 
+## 2026-09-03 — 提出書類のダウンロード機能、LINEメッセージの管理画面内対応
+
+### 提出書類のダウンロード機能
+
+- 社員詳細画面の書類ごとに「ダウンロード」ボタンを追加(`GET /api/admin/file?download=1`で`Content-Disposition: attachment`を付与)
+- 社員単位で、閲覧可能な提出済み書類をまとめてZIPダウンロードできる「提出書類をまとめてダウンロード（ZIP）」ボタンを追加。ZIP化には`fflate`(`zipSync`)を使用(`GET /api/admin/files.zip`、`adminGetZipManifest`)
+- マイナンバー確認書類は、閲覧権限を持つ管理者が見ている場合のみダウンロード対象に含める(既存の`adminGetEmployeeDetail`の`hasFile`判定と同じ範囲に統一)
+
+### LINEメッセージを管理画面内で閲覧・返信できる機能を追加
+
+- これまで「管理者→内定者」への一方向のPush通知しか実装しておらず、内定者からの返信を受け取る経路(Webhook)が無かった課題に対応
+- LINE Webhook受信エンドポイント(`POST /api/line/webhook`)を新設。`x-line-signature`をチャネルシークレットでHMAC-SHA256検証してから処理する(`src/line.ts`の`verifyLineSignature`)
+- 受信したテキスト・画像メッセージを`line_messages`テーブルに保存(`migrations/0007_line_messages.sql`、`src/db/lineMessages.ts`)。画像はLINEの`api-data.line.me`から取得しR2(`DOCS`バケット、`line-images/`プレフィックス)に保存
+- Webhookの再送で二重登録しないよう、LINE側のメッセージIDに一意制約を付け`INSERT OR IGNORE`で受ける
+- `source.userId`が`employees.LineUserId`と一致する(=本人確認済みでLINE連携済みの)内定者のメッセージのみを扱い、未連携ユーザーのメッセージは記録しない
+- 社員詳細画面に「LINEメッセージ」欄(会話履歴のバブル表示＋返信フォーム)を追加。表示中は15秒間隔でポーリングして新着を反映
+- 権限はHR管理者なら誰でも閲覧・返信可能とした(法人別などの制限は設けていない)
+- 設定画面の「LINE公式アカウント設定」に「チャネルシークレット」欄と、登録すべきWebhook URLの案内を追加
+
+### 残課題(ユーザー側の設定作業・未対応)
+
+- [ ] LINE Developersコンソールでチャネルシークレットを取得し、管理画面の設定に登録する
+- [ ] 同コンソールの「Messaging API設定」でWebhook URL(`https://teisyutubutu.hubest.workers.dev/api/line/webhook`)を登録し、「Webhookの利用」をオンにする
+- [ ] 「応答メッセージ」(LINEのデフォルト自動応答)をオフにする(オンのままだと内定者の発言に定型文が自動返信されてしまう)
+- [ ] 応答モードを「Bot」にする
+- [ ] 上記完了後、実際にLINEでメッセージを送って管理画面に表示されるか、返信が届くかを実機確認する(未実施)
+
+### マイグレーション・デプロイ状況
+
+- `migrations/0007_line_messages.sql`を本番D1に適用済み(`npm run db:migrate:remote`)
+- 本番Workerにデプロイ済み(`npm run deploy`)。コミット・GitHub pushも完了
+
 ## 2026-09-01 — Driveの保存先を法人フォルダでも分割、法人フォルダの閲覧権限をマイナンバー権限と連動
 
 ### Driveフォルダ構成を「法人/年度/個人」の3階層に
