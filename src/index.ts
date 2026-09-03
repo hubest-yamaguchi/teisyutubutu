@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { zipSync } from 'fflate';
 import type { Env } from './bindings';
 import * as liffApi from './api/liff';
 import * as adminApi from './api/admin';
@@ -9,6 +10,15 @@ import { AuthError } from './api/auth';
 import { getSessionEmail, issueSessionCookie, clearSessionCookie } from './session';
 import { getEmployeeFile } from './r2';
 import { findAdminByEmail } from './db/admins';
+import { findEmployeeByLineUserId } from './db/employees';
+import { insertInboundMessage } from './db/lineMessages';
+import { getSetting, SETTINGS_KEYS } from './db/settings';
+import { verifyLineSignature, fetchLineMessageContent } from './line';
+
+// レスポンスヘッダーに載せるファイル名。日本語名を含むためRFC 5987のfilename*形式でエンコードする。
+function contentDisposition(disposition: 'inline' | 'attachment', fileName: string): string {
+  return `${disposition}; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
 
 async function nameFor(db: D1Database, email: string | null): Promise<string> {
   if (!email) return '';
@@ -148,6 +158,8 @@ const ADMIN_FUNCTIONS: Record<string, (env: Env, email: string, ...args: any[]) 
   adminToggleOriginalReceived: adminApi.adminToggleOriginalReceived,
   adminSaveToDrive: adminApi.adminSaveToDrive,
   adminSendReminder: adminApi.adminSendReminder,
+  adminGetMessages: adminApi.adminGetMessages,
+  adminSendMessage: adminApi.adminSendMessage,
   adminDeleteMyNumber: adminApi.adminDeleteMyNumber,
   adminListNotifications: adminApi.adminListNotifications,
   adminGetTemplates: adminApi.adminGetTemplates,
@@ -178,21 +190,134 @@ const ADMIN_FUNCTIONS: Record<string, (env: Env, email: string, ...args: any[]) 
 
 app.post('/api/admin/:fn', dispatch(ADMIN_FUNCTIONS, AdminApiError, (c) => [c.get('adminEmail')]));
 
-// 提出書類ファイルの表示(JSONディスパッチではなくバイナリを直接返すため専用ルート)
+// 提出書類ファイルの表示・ダウンロード(JSONディスパッチではなくバイナリを直接返すため専用ルート)。
+// ?download=1 を付けるとブラウザに「保存」させる(付けなければ従来どおりプレビュー表示)。
 app.get('/api/admin/file', async (c) => {
   const email = c.get('adminEmail');
   const employeeId = c.req.query('employeeId') || '';
   const docKey = c.req.query('docKey') || '';
+  const download = c.req.query('download') === '1';
   try {
     const info = await adminApi.adminGetFileInfo(c.env, email, employeeId, docKey);
     const obj = await getEmployeeFile(c.env.DOCS, info.key);
     if (!obj) return c.json({ ok: false, error: 'ファイルが見つかりません' }, 404);
+    return new Response(obj.body, {
+      headers: {
+        'Content-Type': info.mimeType,
+        'Content-Disposition': contentDisposition(download ? 'attachment' : 'inline', info.fileName)
+      }
+    });
+  } catch (err) {
+    const message = err instanceof AdminApiError || err instanceof Error ? err.message : String(err);
+    const status = err instanceof AdminApiError ? 400 : 500;
+    return c.json({ ok: false, error: message }, status);
+  }
+});
+
+// 社員の提出済み書類をまとめてZIPでダウンロードする。
+// 対象範囲は adminGetEmployeeDetail の hasFile === true な書類(マイナンバー等、閲覧権限が
+// 無い管理者には最初から見えない書類は含まれない)と揃えている。
+app.get('/api/admin/files.zip', async (c) => {
+  const email = c.get('adminEmail');
+  const employeeId = c.req.query('employeeId') || '';
+  try {
+    const manifest = await adminApi.adminGetZipManifest(c.env, email, employeeId);
+    const zipInput: Record<string, Uint8Array> = {};
+    for (const f of manifest.files) {
+      const obj = await getEmployeeFile(c.env.DOCS, f.key);
+      if (!obj) continue;
+      zipInput[f.fileName] = new Uint8Array(await obj.arrayBuffer());
+    }
+    if (!Object.keys(zipInput).length) return c.json({ ok: false, error: 'ダウンロードできる書類がありません' }, 404);
+    const zipped = zipSync(zipInput);
+    return new Response(zipped, {
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': contentDisposition('attachment', manifest.zipName)
+      }
+    });
+  } catch (err) {
+    const message = err instanceof AdminApiError || err instanceof Error ? err.message : String(err);
+    const status = err instanceof AdminApiError ? 400 : 500;
+    return c.json({ ok: false, error: message }, status);
+  }
+});
+
+// メッセージに添付された画像の表示(管理画面用)
+app.get('/api/admin/line-image', async (c) => {
+  const email = c.get('adminEmail');
+  const id = Number(c.req.query('id') || '0');
+  try {
+    const info = await adminApi.adminGetMessageImageInfo(c.env, email, id);
+    const obj = await getEmployeeFile(c.env.DOCS, info.key);
+    if (!obj) return c.json({ ok: false, error: '画像が見つかりません' }, 404);
     return new Response(obj.body, { headers: { 'Content-Type': info.mimeType } });
   } catch (err) {
     const message = err instanceof AdminApiError || err instanceof Error ? err.message : String(err);
     const status = err instanceof AdminApiError ? 400 : 500;
     return c.json({ ok: false, error: message }, status);
   }
+});
+
+// ---------- LINE Webhook(内定者から公式アカウントに届いたメッセージの受信) ----------
+// LINE Developersコンソールの「Webhook URL」にこのエンドポイントのURLを登録する。
+// 認証はセッションではなく、チャネルシークレットによるx-line-signature署名検証で行う。
+// employeesテーブルにLINEユーザーIDが登録されている(=本人確認済みでLINE連携済みの)内定者からの
+// メッセージのみを扱い、未連携のユーザーからのメッセージは記録しない。
+app.post('/api/line/webhook', async (c) => {
+  const rawBody = await c.req.text();
+  const secret = await getSetting(c.env.DB, SETTINGS_KEYS.LINE_CHANNEL_SECRET);
+  const signature = c.req.header('x-line-signature');
+  if (!(await verifyLineSignature(secret, rawBody, signature))) {
+    return c.json({ ok: false, error: '署名が一致しません' }, 401);
+  }
+
+  let body: { events?: any[] };
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return c.json({ ok: false, error: 'リクエストの形式が不正です' }, 400);
+  }
+
+  const token = await getSetting(c.env.DB, SETTINGS_KEYS.LINE_CHANNEL_ACCESS_TOKEN);
+
+  for (const event of body.events || []) {
+    if (event.type !== 'message') continue;
+    const lineUserId = event.source?.userId;
+    const message = event.message;
+    if (!lineUserId || !message) continue;
+
+    const employee = await findEmployeeByLineUserId(c.env.DB, lineUserId);
+    if (!employee) continue;
+
+    if (message.type === 'text') {
+      await insertInboundMessage(c.env.DB, {
+        employeeId: employee.EmployeeId,
+        messageType: 'text',
+        text: String(message.text || ''),
+        storageKey: '',
+        mimeType: '',
+        lineMessageId: String(message.id || '')
+      });
+    } else if (message.type === 'image' && token) {
+      const content = await fetchLineMessageContent(token, message.id);
+      if (content) {
+        const ext = content.mimeType.includes('png') ? 'png' : 'jpg';
+        const key = `line-images/${employee.EmployeeId}/${message.id}.${ext}`;
+        await c.env.DOCS.put(key, content.bytes, { httpMetadata: { contentType: content.mimeType } });
+        await insertInboundMessage(c.env.DB, {
+          employeeId: employee.EmployeeId,
+          messageType: 'image',
+          text: '',
+          storageKey: key,
+          mimeType: content.mimeType,
+          lineMessageId: String(message.id || '')
+        });
+      }
+    }
+  }
+
+  return c.json({ ok: true });
 });
 
 // マッチしないルートは静的アセット(public/)にフォールバック

@@ -38,11 +38,12 @@ import {
 } from '../db/templates';
 import { listRecentNotifications } from '../db/notifications';
 import { getSetting, setSetting, setSettings, SETTINGS_KEYS } from '../db/settings';
-import { notifyEmployee } from '../line';
+import { notifyEmployee, sendChatReply } from '../line';
 import { todayStr, nowStr } from '../util/date';
 import { SettingsCategory, SETTINGS_CATEGORIES, sanitizePermissions } from '../permissions';
 import { getEmployeeFile } from '../r2';
 import { getDriveAccessToken, ensureFolder, uploadFileToDrive, syncFolderPermissions } from '../drive';
+import { listMessages, insertOutboundMessage, findMessageById, LineMessageRow } from '../db/lineMessages';
 
 class ApiError extends Error {}
 
@@ -227,7 +228,13 @@ export async function adminDeleteMyNumber(env: Env, email: string, employeeId: s
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 
-// 管理画面から提出ファイルを表示するための認可付きファイル情報取得(実体の取得はindex.ts側でR2から行う)
+// StorageKeyの拡張子部分(employeeFileKeyの命名規則 `{EmployeeId}/{連番}_{書類名}.{拡張子}` に準拠)
+function extFromStorageKey(key: string): string {
+  const m = key.match(/\.([^./]+)$/);
+  return m ? `.${m[1]}` : '';
+}
+
+// 管理画面から提出ファイルを表示・ダウンロードするための認可付きファイル情報取得(実体の取得はindex.ts側でR2から行う)
 export async function adminGetFileInfo(env: Env, email: string, employeeId: string, docKey: string) {
   await requireAdmin(env, email);
   const employee = await findEmployeeById(env.DB, employeeId);
@@ -235,10 +242,87 @@ export async function adminGetFileInfo(env: Env, email: string, employeeId: stri
   if (docKey === 'myNumber' && !(await canViewMyNumber(env.DB, email, employee.Company))) {
     throw new ApiError('この操作にはマイナンバー閲覧権限が必要です');
   }
+  const docTypes = await loadDocTypes(env.DB);
+  const meta = docTypes.find((d) => d.key === docKey);
+  if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
   const subs = await getSubmissionsMap(env.DB, employeeId);
   const sub = subs[docKey];
   if (!sub || !sub.StorageKey) throw new ApiError('ファイルが見つかりません');
-  return { key: sub.StorageKey, mimeType: sub.MimeType || 'application/octet-stream' };
+  return {
+    key: sub.StorageKey,
+    mimeType: sub.MimeType || 'application/octet-stream',
+    fileName: `${employee.Name}_${meta.label}${extFromStorageKey(sub.StorageKey)}`
+  };
+}
+
+// 社員の提出済み書類をまとめてZIPダウンロードするための対象ファイル一覧(実体の取得・zip化はindex.ts側で行う)。
+// 表示中の詳細画面(adminGetEmployeeDetail)で hasFile === true な書類、つまりマイナンバー等の
+// 閲覧権限が無ければ最初から一覧に出ない書類と同じ範囲に揃える。
+export async function adminGetZipManifest(env: Env, email: string, employeeId: string) {
+  await requireAdmin(env, email);
+  const employee = await findEmployeeById(env.DB, employeeId);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  const docTypes = await loadDocTypes(env.DB);
+  const canViewMyNumberFlag = await canViewMyNumber(env.DB, email, employee.Company);
+  const subs = await getSubmissionsMap(env.DB, employeeId);
+
+  const files = docTypes
+    .filter((d) => isApplicable(d, employee))
+    .filter((d) => d.key !== 'myNumber' || canViewMyNumberFlag)
+    .map((d) => ({ d, sub: subs[d.key] }))
+    .filter(({ sub }) => sub && sub.StorageKey)
+    .map(({ d, sub }) => ({
+      key: sub.StorageKey,
+      fileName: `${d.label}${extFromStorageKey(sub.StorageKey)}`
+    }));
+
+  if (!files.length) throw new ApiError('ダウンロードできる書類がありません');
+  return { zipName: `${employee.Name}_提出書類.zip`, files };
+}
+
+// ---------- LINEメッセージ(公式アカウントに届いたメッセージを管理画面内で閲覧・返信) ----------
+// 受信自体はindex.tsのWebhookハンドラがline_messagesテーブルへ書き込む。ここでは読み取りと返信のみ扱う。
+
+function publicMessage(m: LineMessageRow) {
+  return {
+    id: m.Id,
+    direction: m.Direction,
+    messageType: m.MessageType,
+    text: m.Text,
+    hasImage: m.MessageType === 'image' && !!m.StorageKey,
+    adminEmail: m.AdminEmail,
+    createdAt: m.CreatedAt
+  };
+}
+
+// メッセージ中の画像実体(R2)を取得するための認可付き情報取得(実体の取得はindex.ts側でR2から行う)
+export async function adminGetMessageImageInfo(env: Env, email: string, messageId: number) {
+  await requireAdmin(env, email);
+  const message = await findMessageById(env.DB, messageId);
+  if (!message || message.MessageType !== 'image' || !message.StorageKey) throw new ApiError('画像が見つかりません');
+  return { key: message.StorageKey, mimeType: message.MimeType || 'application/octet-stream' };
+}
+
+export async function adminGetMessages(env: Env, email: string, employeeId: string) {
+  await requireAdmin(env, email);
+  const employee = await findEmployeeById(env.DB, employeeId);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  const messages = await listMessages(env.DB, employeeId);
+  return { linked: !!employee.LineUserId, messages: messages.map(publicMessage) };
+}
+
+export async function adminSendMessage(env: Env, email: string, employeeId: string, text: string) {
+  await requireAdmin(env, email);
+  const employee = await findEmployeeById(env.DB, employeeId);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  const trimmed = String(text || '').trim();
+  if (!trimmed) throw new ApiError('メッセージを入力してください');
+  if (!employee.LineUserId) throw new ApiError('この新入社員はまだLINEと連携していません');
+
+  const result = await sendChatReply(env.DB, employee.LineUserId, trimmed);
+  if (!result.sent) throw new ApiError(`LINEへの送信に失敗しました（${result.reason || '不明なエラー'}）`);
+  await insertOutboundMessage(env.DB, employeeId, trimmed, email);
+  return adminGetMessages(env, email, employeeId);
 }
 
 // 法人ごとのマイナンバー閲覧権限(admin.MyNumberCompanies)を、その法人フォルダのDrive閲覧権限として
@@ -334,6 +418,7 @@ export async function adminRemoveTemplate(env: Env, email: string, templateId: s
 export async function settingsGet(env: Env, email: string) {
   await requireAdmin(env, email);
   const token = await getSetting(env.DB, SETTINGS_KEYS.LINE_CHANNEL_ACCESS_TOKEN);
+  const secret = await getSetting(env.DB, SETTINGS_KEYS.LINE_CHANNEL_SECRET);
   const admins = await listAdmins(env.DB);
   const me = admins.find((a) => a.Email === email);
   return {
@@ -341,6 +426,7 @@ export async function settingsGet(env: Env, email: string) {
     myPermissions: me ? me.Permissions : [...SETTINGS_CATEGORIES],
     tabOrder: await getTabOrder(env.DB),
     lineChannelAccessTokenMasked: token ? `設定済み（末尾: …${token.slice(-4)}）` : '未設定',
+    lineChannelSecretMasked: secret ? `設定済み（末尾: …${secret.slice(-4)}）` : '未設定',
     liffChannelId: await getSetting(env.DB, SETTINGS_KEYS.LIFF_CHANNEL_ID),
     driveRootFolderId: await getSetting(env.DB, SETTINGS_KEYS.DRIVE_ROOT_FOLDER_ID),
     admins,
@@ -527,11 +613,12 @@ export async function settingsSaveTabOrder(env: Env, email: string, order: strin
 
 // ---------- API設定(LINE / Liny) ----------
 
-export async function settingsSaveLineChannel(env: Env, email: string, liffChannelId: string, token: string) {
+export async function settingsSaveLineChannel(env: Env, email: string, liffChannelId: string, token: string, channelSecret?: string) {
   await requirePermission(env, email, 'line');
   await setSettings(env.DB, {
     [SETTINGS_KEYS.LIFF_CHANNEL_ID]: liffChannelId || '',
-    ...(token ? { [SETTINGS_KEYS.LINE_CHANNEL_ACCESS_TOKEN]: token } : {})
+    ...(token ? { [SETTINGS_KEYS.LINE_CHANNEL_ACCESS_TOKEN]: token } : {}),
+    ...(channelSecret ? { [SETTINGS_KEYS.LINE_CHANNEL_SECRET]: channelSecret } : {})
   });
   return settingsGet(env, email);
 }

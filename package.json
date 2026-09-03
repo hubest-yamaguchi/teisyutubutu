@@ -28,6 +28,7 @@
     "wrangler": "^4.126.0"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "hono": "^4.13.5"
   }
 }
