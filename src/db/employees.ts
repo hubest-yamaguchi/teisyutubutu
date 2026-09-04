@@ -11,6 +11,8 @@ export type Employee = {
   LineUserId: string;
   PictureUrl?: string;
   DriveSavedAt?: string;
+  JinjerEmployeeId?: string;
+  JinjerSyncedAt?: string;
 };
 
 export async function findEmployeeById(db: D1Database, employeeId: string): Promise<Employee | null> {
@@ -92,6 +94,13 @@ export async function deleteEmployee(db: D1Database, employeeId: string): Promis
 
 export async function markDriveSaved(db: D1Database, employeeId: string, timestamp: string): Promise<void> {
   await db.prepare('UPDATE employees SET DriveSavedAt = ? WHERE EmployeeId = ?').bind(timestamp, employeeId).run();
+}
+
+export async function markJinjerSynced(db: D1Database, employeeId: string, jinjerEmployeeId: string, timestamp: string): Promise<void> {
+  await db
+    .prepare('UPDATE employees SET JinjerEmployeeId = ?, JinjerSyncedAt = ? WHERE EmployeeId = ?')
+    .bind(jinjerEmployeeId, timestamp, employeeId)
+    .run();
 }
 
 export async function bulkSetHireDate(db: D1Database, hireDate: string): Promise<number> {

@@ -1,6 +1,6 @@
 // 設定ページのカテゴリ定義。サイドタブの並び・管理者ごとのチェックボックス権限の両方で使う。
 
-export const SETTINGS_CATEGORIES = ['emp', 'tpl', 'job', 'admin', 'line', 'doc', 'drive', 'setup'] as const;
+export const SETTINGS_CATEGORIES = ['emp', 'tpl', 'job', 'admin', 'line', 'doc', 'drive', 'jinjer', 'setup'] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
 
 export const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
@@ -11,6 +11,7 @@ export const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
   line: 'LINE公式アカウント設定',
   doc: '書類マスタ',
   drive: 'Google Drive連携設定',
+  jinjer: 'jinjer連携設定',
   setup: '初期データ投入'
 };
 

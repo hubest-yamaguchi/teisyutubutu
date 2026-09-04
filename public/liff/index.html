@@ -128,6 +128,7 @@
     // デモモード用の固定データ。DOC_TYPES(model.ts)の全ステータス・全条件パターンを一通り見せる。
     var DEMO_JOB_TYPES = ['整備士', '営業職', '事務職'];
     var DEMO_EMPLOYEE = { id: 'DEMO0001', name: '山田 太郎', company: 'ホンダカーズ佐賀', commute: '車', hireDate: '2026-10-01' };
+    var DEMO_EMERGENCY_CONTACTS = [];
     var DEMO_DOCS = [
       { key: 'guarantor', label: '身元保証書', description: '内定者本人と保証人が記入する書類です。必ずボールペンで記入してください。', requiresOriginal: true, pdfAllowed: false, status: '原本提出待ち', submittedAt: '2026-08-20', rejectReason: '', rejectedAt: '' },
       { key: 'bank', label: '給与振込先届', description: '通帳のコピーなど、口座名義・口座番号・支店名がわかるものを提出してください。', requiresOriginal: false, pdfAllowed: false, status: '承認済', submittedAt: '2026-08-18', rejectReason: '', rejectedAt: '' },
@@ -141,11 +142,14 @@
     ];
 
     function demoPayload() {
+      var commutes = STATE.commutes.length ? STATE.commutes : ['車', '自転車', '電車・バス・徒歩'];
       var applicable = DEMO_DOCS.filter(function (d) { return d.status !== '対象外'; });
       var done = applicable.filter(function (d) { return d.status !== '未提出'; }).length;
       return {
         ok: true, matched: true, needsCommute: false,
-        employee: DEMO_EMPLOYEE, companies: [], commutes: STATE.commutes.length ? STATE.commutes : ['車', '自転車', '電車・バス・徒歩'],
+        needsEmergencyContact: !DEMO_EMERGENCY_CONTACTS.length,
+        employee: DEMO_EMPLOYEE, companies: [], commutes: commutes,
+        emergencyContacts: DEMO_EMERGENCY_CONTACTS,
         docs: DEMO_DOCS, progressPct: applicable.length ? Math.round((done / applicable.length) * 100) : 100,
         stage: '確認中'
       };
@@ -160,6 +164,10 @@
         if (fn === 'confirmBind') return { ok: true, matched: true, needsCommute: true, employee: DEMO_EMPLOYEE, companies: [], commutes: ['車', '自転車', '電車・バス・徒歩'], docs: [], progressPct: 0, stage: '未提出' };
         if (fn === 'saveCommute') {
           DEMO_EMPLOYEE.commute = args[2];
+          return demoPayload();
+        }
+        if (fn === 'saveEmergencyContacts') {
+          DEMO_EMERGENCY_CONTACTS = args[2];
           return demoPayload();
         }
         if (fn === 'getMyDocuments' || fn === 'liffBind' || fn === 'getMyStatusByLine') return demoPayload();
@@ -296,8 +304,128 @@
       STATE.docs = res.docs || [];
       STATE.companies = res.companies || STATE.companies;
       STATE.commutes = res.commutes || STATE.commutes;
+      STATE.emergencyContacts = res.emergencyContacts || [];
+      STATE.needsEmergencyContact = !!res.needsEmergencyContact;
       if (res.needsCommute) { renderCommuteForm(res); return; }
       renderList(res);
+    }
+
+    // 緊急連絡先：別画面でブロックせず、書類一覧画面の一番下に組み込んで表示する。
+    // 1件目のみ姓・名・続柄・電話番号を必須とし、フリガナ・住所・E-mailは任意。「+ 連絡先を追加」で複数件入力できる。
+    var EC_NEXT_INDEX = 0;
+
+    function ecFieldRow_(idx, field, label, type, required, value) {
+      return '<label class="muted">' + label + (required ? '<span style="color:#C1443A;">（必須）</span>' : '') + '</label>' +
+        '<input type="' + (type || 'text') + '" id="ec-' + idx + '-' + field + '" value="' + escHtml_(value || '') + '" ' +
+        'style="width:100%;padding:8px;border:1px solid #DBE1DF;border-radius:8px;font-size:.85rem;margin:2px 0 8px;box-sizing:border-box;">';
+    }
+
+    function ecBlockHtml_(idx, data) {
+      data = data || {};
+      var isFirst = idx === 0;
+      return '<div class="card" id="ecBlock-' + idx + '">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+        '<b>緊急連絡先 ' + (idx + 1) + '</b>' +
+        (isFirst ? '' : '<button class="ghost" style="width:auto;padding:4px 10px;font-size:.72rem;" onclick="removeEcBlock(' + idx + ')">削除</button>') +
+        '</div>' +
+        ecFieldRow_(idx, 'LastNameKana', '姓（フリガナ）', 'text', false, data.LastNameKana) +
+        ecFieldRow_(idx, 'FirstNameKana', '名（フリガナ）', 'text', false, data.FirstNameKana) +
+        ecFieldRow_(idx, 'LastName', '姓', 'text', isFirst, data.LastName) +
+        ecFieldRow_(idx, 'FirstName', '名', 'text', isFirst, data.FirstName) +
+        ecFieldRow_(idx, 'Relationship', '続柄（例: 父・母・配偶者）', 'text', isFirst, data.Relationship) +
+        ecFieldRow_(idx, 'PhoneNumber', '電話番号', 'tel', isFirst, data.PhoneNumber) +
+        ecFieldRow_(idx, 'PostalCode', '郵便番号', 'text', false, data.PostalCode) +
+        ecFieldRow_(idx, 'AddressKana', '住所（フリガナ）', 'text', false, data.AddressKana) +
+        ecFieldRow_(idx, 'Prefecture', '都道府県', 'text', false, data.Prefecture) +
+        ecFieldRow_(idx, 'City', '市区町村', 'text', false, data.City) +
+        ecFieldRow_(idx, 'AddressLine', '丁目・番地', 'text', false, data.AddressLine) +
+        ecFieldRow_(idx, 'Building', '建物名', 'text', false, data.Building) +
+        ecFieldRow_(idx, 'Email', 'E-mail', 'email', false, data.Email) +
+        '</div>';
+    }
+
+    // 登録済みなら簡易サマリー＋「編集する」、未登録ならその場で案内文を出す(フォーム自体はrenderListがscrollIntoViewで開く)
+    function ecSummaryHtml_(contacts) {
+      return contacts.map(function (c) {
+        var name = (c.LastName || '') + ' ' + (c.FirstName || '');
+        return '<div class="doc-row"><span>' + escHtml_(name) + (c.Relationship ? '（' + escHtml_(c.Relationship) + '）' : '') + '</span>' +
+          '<span class="muted">' + escHtml_(c.PhoneNumber || '') + '</span></div>';
+      }).join('');
+    }
+
+    function renderEcSection_() {
+      var contacts = STATE.emergencyContacts || [];
+      return '<div class="card"><h2>緊急連絡先</h2>' +
+        (contacts.length
+          ? ecSummaryHtml_(contacts) + '<div style="height:8px;"></div><button class="ghost" onclick="showEcEditForm()">緊急連絡先を編集する</button>'
+          : '<p class="muted">緊急時にご連絡できるご家族などの情報を、最低1件ご登録ください。</p>') +
+        '</div>' +
+        '<div id="ecArea"></div>';
+    }
+
+    // 緊急連絡先の入力フォームを#ecAreaに展開する(登録済みなら内容をプリセットして編集できる)
+    function showEcEditForm() {
+      var contacts = (STATE.emergencyContacts && STATE.emergencyContacts.length) ? STATE.emergencyContacts : [{}];
+      EC_NEXT_INDEX = contacts.length;
+      var blocksHtml = contacts.map(function (c, i) { return ecBlockHtml_(i, c); }).join('');
+      document.getElementById('ecArea').innerHTML =
+        '<div class="card">' +
+        '<div id="ecBlocks">' + blocksHtml + '</div>' +
+        '<button class="ghost" onclick="addEcBlock()">+ 連絡先を追加</button>' +
+        '<div style="height:8px;"></div>' +
+        '<button onclick="saveEmergencyContactsClick()">保存する</button>' +
+        '<p id="ecStatus" class="muted" style="margin-top:8px;"></p>' +
+        '</div>';
+      document.getElementById('ecArea').scrollIntoView();
+    }
+
+    function addEcBlock() {
+      var idx = EC_NEXT_INDEX++;
+      document.getElementById('ecBlocks').insertAdjacentHTML('beforeend', ecBlockHtml_(idx));
+    }
+
+    function removeEcBlock(idx) {
+      var el = document.getElementById('ecBlock-' + idx);
+      if (el) el.remove();
+    }
+
+    function collectEcBlocks_() {
+      var blocks = document.querySelectorAll('#ecBlocks .card');
+      var contacts = [];
+      blocks.forEach(function (block) {
+        var idx = block.id.replace('ecBlock-', '');
+        function v(field) {
+          var el = document.getElementById('ec-' + idx + '-' + field);
+          return el ? el.value.trim() : '';
+        }
+        var c = {
+          LastNameKana: v('LastNameKana'), FirstNameKana: v('FirstNameKana'),
+          LastName: v('LastName'), FirstName: v('FirstName'),
+          Relationship: v('Relationship'), PostalCode: v('PostalCode'),
+          AddressKana: v('AddressKana'), Prefecture: v('Prefecture'),
+          City: v('City'), AddressLine: v('AddressLine'), Building: v('Building'),
+          PhoneNumber: v('PhoneNumber'), Email: v('Email')
+        };
+        // 全項目が空のブロック(追加ボタンを押しただけ等)は無視する
+        var hasAny = Object.keys(c).some(function (k) { return c[k]; });
+        if (hasAny) contacts.push(c);
+      });
+      return contacts;
+    }
+
+    function saveEmergencyContactsClick() {
+      var st = document.getElementById('ecStatus');
+      var contacts = collectEcBlocks_();
+      if (!contacts.length) { st.textContent = '緊急連絡先を1件以上入力してください'; return; }
+      var first = contacts[0];
+      if (!first.LastName || !first.FirstName || !first.Relationship || !first.PhoneNumber) {
+        st.textContent = '1件目は姓・名・続柄・電話番号を入力してください';
+        return;
+      }
+      st.textContent = '保存中…';
+      callServer_('saveEmergencyContacts', [STATE.employee.id, STATE.lineUserId, contacts]).then(function (res) {
+        applyPayload(res);
+      }).catch(function (err) { st.textContent = err && err.message ? err.message : String(err); });
     }
 
     // 管理者の通知先ID登録用：自分のLINEユーザーIDを表示するだけ(書類機能は使わない)
@@ -439,8 +567,12 @@
         ' <a href="#" onclick="renderCommuteForm({employee: STATE.employee}); return false;" style="color:#16867C;">変更</a></p></div>' +
         '<div class="card">' + rows + '</div>' +
         rejectedHtml +
-        '<div id="uploadArea"></div>'
+        '<div id="uploadArea"></div>' +
+        renderEcSection_()
       );
+
+      // 未登録の場合は、一番下の緊急連絡先セクションの入力フォームを最初から開いておく
+      if (STATE.needsEmergencyContact) showEcEditForm();
     }
 
     function escHtml_(v) {

@@ -14,9 +14,11 @@ import {
   bulkSetHireDate,
   deleteEmployee,
   markDriveSaved,
+  markJinjerSynced,
   Employee
 } from '../db/employees';
 import { getSubmissionsMap, getAllSubmissions, upsertSubmission } from '../db/submissions';
+import { listEmergencyContacts } from '../db/emergencyContacts';
 import { appendHistory } from '../db/history';
 import { loadDocTypes, seedCompanyDocumentConfigIfEmpty, upsertDocConfig, removeDocConfig } from '../db/docConfig';
 import { getJobTypeCompanyMap, setJobTypeCompany, removeJobType } from '../db/jobTypeMap';
@@ -43,6 +45,7 @@ import { todayStr, nowStr } from '../util/date';
 import { SettingsCategory, SETTINGS_CATEGORIES, sanitizePermissions } from '../permissions';
 import { getEmployeeFile } from '../r2';
 import { getDriveAccessToken, ensureFolder, uploadFileToDrive, syncFolderPermissions } from '../drive';
+import { upsertEmployeeMaster, attachFile } from '../jinjer';
 import { listMessages, insertOutboundMessage, findMessageById, LineMessageRow } from '../db/lineMessages';
 
 class ApiError extends Error {}
@@ -82,7 +85,8 @@ function publicEmployee(employee: Employee) {
     commute: employee.Commute,
     hireDate: employee.HireDate,
     pictureUrl: employee.PictureUrl || '',
-    driveSavedAt: employee.DriveSavedAt || ''
+    driveSavedAt: employee.DriveSavedAt || '',
+    jinjerSyncedAt: employee.JinjerSyncedAt || ''
   };
 }
 
@@ -161,7 +165,14 @@ export async function adminGetEmployeeDetail(env: Env, email: string, employeeId
     };
   });
 
-  return { employee: publicEmployee(employee), docs, stage: computeStage(employee, subsToStatusMap(subs as any), docTypes) };
+  const emergencyContacts = await listEmergencyContacts(env.DB, employeeId);
+
+  return {
+    employee: publicEmployee(employee),
+    docs,
+    emergencyContacts,
+    stage: computeStage(employee, subsToStatusMap(subs as any), docTypes)
+  };
 }
 
 export async function adminApproveDoc(env: Env, email: string, employeeId: string, docKey: string) {
@@ -391,6 +402,75 @@ export async function adminSaveToDrive(env: Env, email: string, employeeId: stri
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 
+// ---------- jinjer連携 ----------
+// 【重要】認証方式・エンドポイント・fileオブジェクトの形式は未確認(src/jinjer.tsの「要確認」コメント参照)。
+// APIキー発行・開発者ガイド確認後、jinjer.ts側を実仕様に合わせて調整すること。
+
+async function requireJinjerConfig(env: Env): Promise<{ baseUrl: string; apiKey: string }> {
+  const baseUrl = await getSetting(env.DB, SETTINGS_KEYS.JINJER_API_BASE_URL);
+  if (!baseUrl) throw new ApiError('jinjerのAPIベースURLが未設定です（設定 > jinjer連携設定で指定してください）');
+  if (!env.JINJER_API_KEY) throw new ApiError('jinjerのAPIキー(secret)が未設定です');
+  return { baseUrl, apiKey: env.JINJER_API_KEY };
+}
+
+// (A) 従業員マスタ情報(氏名・フリガナ・配属先・入社予定日・職種)をjinjerに登録/更新する。
+// Driveへの保存と同じく、自動送信ではなく管理者がこのボタンを押した時だけ実行する。
+export async function adminSyncToJinjer(env: Env, email: string, employeeId: string) {
+  await requireAdmin(env, email);
+  const employee = await findEmployeeById(env.DB, employeeId);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  const { baseUrl, apiKey } = await requireJinjerConfig(env);
+
+  const { jinjerEmployeeId } = await upsertEmployeeMaster(baseUrl, apiKey, {
+    code: employee.EmployeeId,
+    name: employee.Name,
+    kana: employee.Kana,
+    company: employee.Company,
+    hireDate: employee.HireDate,
+    jobType: employee.JobType
+  });
+  await markJinjerSynced(env.DB, employeeId, jinjerEmployeeId, nowStr());
+  await appendHistory(env.DB, employeeId, '', 'jinjer同期', '従業員マスタ情報をjinjerに登録/更新', email);
+  return adminGetEmployeeDetail(env, email, employeeId);
+}
+
+// (B) 承認済み書類のうち、書類マスタでjinjerカスタム項目コードが設定されているものだけをjinjerに送信する
+// (未設定の書類種別は、jinjer側にまだ対応するカスタム項目が無いとみなして対象外にする)。
+export async function adminSendFilesToJinjer(env: Env, email: string, employeeId: string) {
+  await requireAdmin(env, email);
+  const employee = await findEmployeeById(env.DB, employeeId);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  const { baseUrl, apiKey } = await requireJinjerConfig(env);
+
+  const docTypes = await loadDocTypes(env.DB);
+  const subs = await getSubmissionsMap(env.DB, employeeId);
+  const targets = applicableDocTypes(employee, docTypes).filter(
+    (d) => d.jinjerCustomItemCode && subs[d.key]?.Status === STATUS.APPROVED && subs[d.key]?.StorageKey
+  );
+  if (!targets.length) {
+    throw new ApiError('jinjerに送信できる承認済み書類がありません（書類マスタでjinjerカスタム項目コードを設定した書類のみが対象です）');
+  }
+
+  let sentCount = 0;
+  for (const d of targets) {
+    const sub = subs[d.key];
+    const obj = await getEmployeeFile(env.DOCS, sub.StorageKey);
+    if (!obj) continue;
+    await attachFile(baseUrl, apiKey, {
+      employeeId: employee.EmployeeId,
+      customItemCode: d.jinjerCustomItemCode!,
+      fileName: `${employee.Name}_${d.label}`,
+      mimeType: sub.MimeType || 'application/octet-stream',
+      bytes: await obj.arrayBuffer()
+    });
+    sentCount++;
+  }
+  if (!sentCount) throw new ApiError('送信対象のファイル実体が見つかりませんでした');
+
+  await appendHistory(env.DB, employeeId, '', 'jinjerファイル送信', `承認済み書類${sentCount}件をjinjerに送信`, email);
+  return adminGetEmployeeDetail(env, email, employeeId);
+}
+
 export async function adminListNotifications(env: Env, email: string) {
   await requireAdmin(env, email);
   return listRecentNotifications(env.DB, 100);
@@ -429,6 +509,8 @@ export async function settingsGet(env: Env, email: string) {
     lineChannelSecretMasked: secret ? `設定済み（末尾: …${secret.slice(-4)}）` : '未設定',
     liffChannelId: await getSetting(env.DB, SETTINGS_KEYS.LIFF_CHANNEL_ID),
     driveRootFolderId: await getSetting(env.DB, SETTINGS_KEYS.DRIVE_ROOT_FOLDER_ID),
+    jinjerApiBaseUrl: await getSetting(env.DB, SETTINGS_KEYS.JINJER_API_BASE_URL),
+    jinjerCompanyId: await getSetting(env.DB, SETTINGS_KEYS.JINJER_COMPANY_ID),
     admins,
     rejectTemplates: await listTemplates(env.DB, 'reject'),
     reminderTemplates: await listTemplates(env.DB, 'reminder'),
@@ -629,6 +711,18 @@ export async function settingsSaveLineChannel(env: Env, email: string, liffChann
 export async function settingsSaveDriveConfig(env: Env, email: string, rootFolderId: string) {
   await requirePermission(env, email, 'drive');
   await setSetting(env.DB, SETTINGS_KEYS.DRIVE_ROOT_FOLDER_ID, (rootFolderId || '').trim());
+  return settingsGet(env, email);
+}
+
+// ---------- jinjer連携設定 ----------
+// APIキーはここでは扱わない(wrangler secretで別途設定)。ここはベースURL・会社IDのみ。
+
+export async function settingsSaveJinjerConfig(env: Env, email: string, baseUrl: string, companyId: string) {
+  await requirePermission(env, email, 'jinjer');
+  await setSettings(env.DB, {
+    [SETTINGS_KEYS.JINJER_API_BASE_URL]: (baseUrl || '').trim(),
+    [SETTINGS_KEYS.JINJER_COMPANY_ID]: (companyId || '').trim()
+  });
   return settingsGet(env, email);
 }
 

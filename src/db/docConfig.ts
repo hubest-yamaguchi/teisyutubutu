@@ -15,6 +15,7 @@ type DocConfigRow = {
   Description: string;
   SortOrder: number;
   CompaniesJson: string;
+  JinjerCustomItemCode: string;
 };
 
 export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
@@ -36,7 +37,8 @@ export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
       pdfAllowed: !!r.PdfAllowed,
       sensitive: !!r.Sensitive,
       description: r.Description || '',
-      companies
+      companies,
+      jinjerCustomItemCode: r.JinjerCustomItemCode || ''
     };
     if (String(r.ConditionType || '').trim() === '通勤手段' && r.ConditionValue) {
       d.condition = { type: 'commute', value: String(r.ConditionValue).trim() } as DocCondition;
@@ -52,8 +54,8 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
 
   const stmt = db.prepare(
     `INSERT INTO company_document_config
-      (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, JinjerCustomItemCode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   await db.batch(
     DOC_TYPES.map((d, i) =>
@@ -67,7 +69,8 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
         d.sensitive ? 1 : 0,
         d.description ?? '',
         i,
-        JSON.stringify(d.companies ?? [])
+        JSON.stringify(d.companies ?? []),
+        d.jinjerCustomItemCode ?? ''
       )
     )
   );
@@ -77,12 +80,13 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
   await db
     .prepare(
       `INSERT INTO company_document_config
-        (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, JinjerCustomItemCode)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(DocKey) DO UPDATE SET
          Label=excluded.Label, RequiresOriginal=excluded.RequiresOriginal, PdfAllowed=excluded.PdfAllowed,
          ConditionType=excluded.ConditionType, ConditionValue=excluded.ConditionValue, Sensitive=excluded.Sensitive,
-         Description=excluded.Description, SortOrder=excluded.SortOrder, CompaniesJson=excluded.CompaniesJson`
+         Description=excluded.Description, SortOrder=excluded.SortOrder, CompaniesJson=excluded.CompaniesJson,
+         JinjerCustomItemCode=excluded.JinjerCustomItemCode`
     )
     .bind(
       doc.key,
@@ -94,7 +98,8 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
       doc.sensitive ? 1 : 0,
       doc.description ?? '',
       sortOrder,
-      JSON.stringify(doc.companies ?? [])
+      JSON.stringify(doc.companies ?? []),
+      doc.jinjerCustomItemCode ?? ''
     )
     .run();
 }

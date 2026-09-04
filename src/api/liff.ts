@@ -7,6 +7,7 @@ import { getJobTypeCompanyMap } from '../db/jobTypeMap';
 import { getSubmissionsMap, upsertSubmission } from '../db/submissions';
 import { appendHistory } from '../db/history';
 import { loadDocTypes } from '../db/docConfig';
+import { listEmergencyContacts, saveEmergencyContacts, EmergencyContact } from '../db/emergencyContacts';
 import { saveEmployeeFile } from '../r2';
 import { getSetting } from '../db/settings';
 import { SETTINGS_KEYS } from '../db/settings';
@@ -45,6 +46,11 @@ async function buildDocumentsPayload(db: D1Database, employee: Employee) {
     base.stage = '未提出';
     return base;
   }
+
+  // 緊急連絡先(最低1件)。別画面でブロックはせず、書類一覧画面の下部に組み込んで表示するための情報として渡す
+  const emergencyContacts = await listEmergencyContacts(db, employee.EmployeeId);
+  base.needsEmergencyContact = emergencyContacts.length === 0;
+  base.emergencyContacts = emergencyContacts;
 
   const docTypes = await loadDocTypes(db);
   const subs = await getSubmissionsMap(db, employee.EmployeeId);
@@ -163,6 +169,28 @@ export async function saveCommute(env: Env, eid: string, lineUserId: string, com
   employee.Commute = commute;
   await saveEmployee(env.DB, employee);
   await appendHistory(env.DB, eid, '', '通勤手段回答', `通勤手段: ${commute}`, '');
+
+  const payload = await buildDocumentsPayload(env.DB, employee);
+  payload.ok = true;
+  return payload;
+}
+
+// 緊急連絡先の保存(初回登録・再編集とも同じ経路。既存内容は全て置き換わる)。
+// 最低1件必須で、1件目のみ 姓・名・続柄・電話番号 を必須項目とする(2件目以降・フリガナ・住所・E-mailは任意)。
+export async function saveEmergencyContactsApi(env: Env, eid: string, lineUserId: string, contacts: EmergencyContact[]) {
+  const employee = await findEmployeeById(env.DB, eid);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  if (!employee.LineUserId || employee.LineUserId !== lineUserId) {
+    throw new ApiError('本人確認ができませんでした。LINEアプリから開き直してください。');
+  }
+  if (!Array.isArray(contacts) || contacts.length === 0) throw new ApiError('緊急連絡先を1件以上入力してください');
+  const first = contacts[0];
+  if (!first.LastName || !first.FirstName || !first.Relationship || !first.PhoneNumber) {
+    throw new ApiError('1件目の緊急連絡先は、姓・名・続柄・電話番号を入力してください');
+  }
+
+  await saveEmergencyContacts(env.DB, eid, contacts);
+  await appendHistory(env.DB, eid, '', '緊急連絡先登録', `${contacts.length}件登録`, '');
 
   const payload = await buildDocumentsPayload(env.DB, employee);
   payload.ok = true;

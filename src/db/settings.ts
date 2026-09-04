@@ -7,7 +7,9 @@ export const SETTINGS_KEYS = {
   LINE_CHANNEL_SECRET: 'LINE_CHANNEL_SECRET', // Webhook署名検証用(LINE Developersコンソールの「チャネルシークレット」)
   LIFF_CHANNEL_ID: 'LIFF_CHANNEL_ID',
   SETTINGS_TAB_ORDER: 'SETTINGS_TAB_ORDER',
-  DRIVE_ROOT_FOLDER_ID: 'DRIVE_ROOT_FOLDER_ID'
+  DRIVE_ROOT_FOLDER_ID: 'DRIVE_ROOT_FOLDER_ID',
+  JINJER_API_BASE_URL: 'JINJER_API_BASE_URL', // 【要確認】開発者ガイドで実際のベースURLを確認する
+  JINJER_COMPANY_ID: 'JINJER_COMPANY_ID'
 } as const;
 
 export async function getSetting(db: D1Database, key: string): Promise<string> {

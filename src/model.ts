@@ -15,6 +15,7 @@ export type DocType = {
   condition?: DocCondition;
   companies?: string[]; // 空/未指定なら全社共通。指定した法人の内定者にのみ提出を求める
   description?: string;
+  jinjerCustomItemCode?: string; // jinjer側に用意した「カスタム項目(ファイル形式)」のコード。空ならjinjer送信対象外
 };
 
 export const DOC_TYPES: DocType[] = [
