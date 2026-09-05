@@ -25,8 +25,9 @@
 //   FirstNameKana→first_name_phonetic, PhoneNumber→phone_number, PostalCode→zip_code,
 //   AddressKana→address_phonetic, AddressLine→street, Building→building, Email→email
 //   ※phone_numberは`^0\d{1,4}-\d{1,4}-\d{3,5}$`(ハイフン区切り。ハイフン抜きの桁数は11桁以内)、
-//     zip_codeは`^\d{3}-\d{4}$`(ハイフン区切り)の形式である必要があることをバリデーションエラーで確認した
-//     (ハイフンを除去して送ると400エラーになる。うちのDB上の値がハイフン付き前提であることが必須条件になる)
+//     zip_codeは`^\d{3}-\d{4}$`(ハイフン区切り)の形式である必要があることをバリデーションエラーで確認した。
+//     内定者側の入力はハイフン無しでも許容しているため、normalizePhoneNumber()/normalizeZipCode()で
+//     10桁/11桁/7桁の数字列にハイフンを自動で補ってから送信する(元々ハイフン付きの値もそのまま通る)
 //   ※続柄(relationship)は{ id: "4" }のようにIDで指定する。GET /v1/master/relationships で全33件の
 //     固定マスタ(本人・妻・夫・母・父…)が取れることを確認したので、RELATIONSHIP_ID_BY_NAMEにハードコードする
 //   ※都道府県/市区町村は`national_local_government_code`という全国地方公共団体コードで指定する。
@@ -138,6 +139,25 @@ export async function upsertEmployeeMaster(
   return { jinjerEmployeeId: data.id };
 }
 
+// jinjer側のバリデーション(^0\d{1,4}-\d{1,4}-\d{3,5}$、ハイフン抜きで11桁以内)に合わせて、
+// 内定者がハイフン無しで入力した場合でも通るようにハイフンを補う。携帯番号(11桁)は3-4-4、
+// 一般的な10桁は2-4-4で区切る(実際の市外局番の正しい桁数とは限らないが、jinjer側は正規表現での
+// 形式チェックのみなので、この分割で問題なく通ることを確認済み)。既にハイフンが入っている場合や
+// 10/11桁以外の場合はそのまま渡す(要フォーマット確認をログではなく呼び出し結果のエラーに委ねる)。
+function normalizePhoneNumber(raw: string): string {
+  const digits = raw.replace(/[^0-9]/g, '');
+  if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  if (digits.length === 10) return `${digits.slice(0, 2)}-${digits.slice(2, 6)}-${digits.slice(6)}`;
+  return raw;
+}
+
+// jinjer側のバリデーション(^\d{3}-\d{4}$)に合わせて、ハイフン無し7桁の入力にハイフンを補う。
+function normalizeZipCode(raw: string): string {
+  const digits = raw.replace(/[^0-9]/g, '');
+  if (digits.length === 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return raw;
+}
+
 // 緊急連絡先の登録。1件ずつ呼び出す想定(ファイル先頭のコメント参照)。
 export async function syncEmergencyContact(
   baseUrl: string,
@@ -150,8 +170,8 @@ export async function syncEmergencyContact(
     first_name: contact.firstName,
     last_name_phonetic: contact.lastNameKana,
     first_name_phonetic: contact.firstNameKana,
-    phone_number: contact.phoneNumber,
-    zip_code: contact.postalCode,
+    phone_number: normalizePhoneNumber(contact.phoneNumber),
+    zip_code: normalizeZipCode(contact.postalCode),
     address_phonetic: contact.addressKana,
     street: contact.addressLine,
     building: contact.building,
