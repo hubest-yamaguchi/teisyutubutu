@@ -96,11 +96,14 @@ export async function markDriveSaved(db: D1Database, employeeId: string, timesta
   await db.prepare('UPDATE employees SET DriveSavedAt = ? WHERE EmployeeId = ?').bind(timestamp, employeeId).run();
 }
 
-export async function markJinjerSynced(db: D1Database, employeeId: string, jinjerEmployeeId: string, timestamp: string): Promise<void> {
-  await db
-    .prepare('UPDATE employees SET JinjerEmployeeId = ?, JinjerSyncedAt = ? WHERE EmployeeId = ?')
-    .bind(jinjerEmployeeId, timestamp, employeeId)
-    .run();
+// jinjer側の社員番号は、こちらで新規作成するものではなく、jinjer側で別途決まった番号をHRが
+// 事前に入力しておくもの(社員番号の紐付けタイミングについてはsrc/api/admin.tsのadminSyncToJinjer参照)。
+export async function setJinjerEmployeeId(db: D1Database, employeeId: string, jinjerEmployeeId: string): Promise<void> {
+  await db.prepare('UPDATE employees SET JinjerEmployeeId = ? WHERE EmployeeId = ?').bind(jinjerEmployeeId, employeeId).run();
+}
+
+export async function markJinjerSynced(db: D1Database, employeeId: string, timestamp: string): Promise<void> {
+  await db.prepare('UPDATE employees SET JinjerSyncedAt = ? WHERE EmployeeId = ?').bind(timestamp, employeeId).run();
 }
 
 export async function bulkSetHireDate(db: D1Database, hireDate: string): Promise<number> {

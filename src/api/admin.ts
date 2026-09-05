@@ -15,6 +15,7 @@ import {
   deleteEmployee,
   markDriveSaved,
   markJinjerSynced,
+  setJinjerEmployeeId,
   Employee
 } from '../db/employees';
 import { getSubmissionsMap, getAllSubmissions, upsertSubmission } from '../db/submissions';
@@ -45,7 +46,8 @@ import { todayStr, nowStr } from '../util/date';
 import { SettingsCategory, SETTINGS_CATEGORIES, sanitizePermissions } from '../permissions';
 import { getEmployeeFile } from '../r2';
 import { getDriveAccessToken, ensureFolder, uploadFileToDrive, syncFolderPermissions } from '../drive';
-import { upsertEmployeeMaster, attachFile } from '../jinjer';
+import { getAccessToken, attachFile, syncEmergencyContact, resolveRelationshipId, listMunicipalities } from '../jinjer';
+import { replaceMunicipalities, findMunicipalityCode, countMunicipalities } from '../db/jinjerMunicipalities';
 import { listMessages, insertOutboundMessage, findMessageById, LineMessageRow } from '../db/lineMessages';
 
 class ApiError extends Error {}
@@ -86,7 +88,8 @@ function publicEmployee(employee: Employee) {
     hireDate: employee.HireDate,
     pictureUrl: employee.PictureUrl || '',
     driveSavedAt: employee.DriveSavedAt || '',
-    jinjerSyncedAt: employee.JinjerSyncedAt || ''
+    jinjerSyncedAt: employee.JinjerSyncedAt || '',
+    jinjerEmployeeId: employee.JinjerEmployeeId || ''
   };
 }
 
@@ -403,34 +406,86 @@ export async function adminSaveToDrive(env: Env, email: string, employeeId: stri
 }
 
 // ---------- jinjer連携 ----------
-// 【重要】認証方式・エンドポイント・fileオブジェクトの形式は未確認(src/jinjer.tsの「要確認」コメント参照)。
-// APIキー発行・開発者ガイド確認後、jinjer.ts側を実仕様に合わせて調整すること。
+// 【重要】従業員マスタのエンドポイント・fileオブジェクトの形式など、一部は未確認(src/jinjer.tsの「要確認」コメント参照)。
+// 認証(APIキー/シークレットキー→アクセストークン取得→Bearer)・緊急連絡先の取得/登録は動作確認済み。
 
-async function requireJinjerConfig(env: Env): Promise<{ baseUrl: string; apiKey: string }> {
+async function requireJinjerConfig(env: Env): Promise<{ baseUrl: string; accessToken: string }> {
   const baseUrl = await getSetting(env.DB, SETTINGS_KEYS.JINJER_API_BASE_URL);
   if (!baseUrl) throw new ApiError('jinjerのAPIベースURLが未設定です（設定 > jinjer連携設定で指定してください）');
-  if (!env.JINJER_API_KEY) throw new ApiError('jinjerのAPIキー(secret)が未設定です');
-  return { baseUrl, apiKey: env.JINJER_API_KEY };
+  const apiKey = await getSetting(env.DB, SETTINGS_KEYS.JINJER_API_KEY);
+  const secretKey = await getSetting(env.DB, SETTINGS_KEYS.JINJER_API_SECRET_KEY);
+  if (!apiKey || !secretKey) throw new ApiError('jinjerのAPIキー/シークレットキーが未設定です（設定 > jinjer連携設定で指定してください）');
+  const accessToken = await getAccessToken(baseUrl, apiKey, secretKey);
+  return { baseUrl, accessToken };
 }
 
-// (A) 従業員マスタ情報(氏名・フリガナ・配属先・入社予定日・職種)をjinjerに登録/更新する。
-// Driveへの保存と同じく、自動送信ではなく管理者がこのボタンを押した時だけ実行する。
+// 接続テスト用: アクセストークンの取得だけを行い、社員データには一切触れない(読み取りも書き込みも無し)。
+export async function adminTestJinjerConnection(env: Env, email: string) {
+  await requirePermission(env, email, 'jinjer');
+  await requireJinjerConfig(env);
+  return { ok: true };
+}
+
+// jinjerの市区町村マスタ(全国約1900件)をこちらのDBにキャッシュし直す。緊急連絡先の住所(都道府県/市区町村)を
+// jinjerの全国地方公共団体コードに変換するために使う(src/jinjer.ts先頭のコメント参照)。
+// 市区町村の統廃合はごく稀にしか起きないため、初回セットアップ時に1回実行すれば基本的には十分な想定。
+export async function adminSyncJinjerMunicipalities(env: Env, email: string) {
+  await requirePermission(env, email, 'jinjer');
+  const { baseUrl, accessToken } = await requireJinjerConfig(env);
+  const rows = await listMunicipalities(baseUrl, accessToken);
+  await replaceMunicipalities(env.DB, rows);
+  return { count: rows.length };
+}
+
+// 緊急連絡先をjinjerに登録する。Driveへの保存と同じく、自動送信ではなく管理者がこのボタンを押した時だけ実行する。
+// 続柄・都道府県/市区町村は分かる範囲でコードを引き当てて送る(見つからない場合は未指定のまま)。
+//
+// 【重要な前提】
+// - jinjer側の社員番号(employee_id)は、このシステムのEmployeeId(例:E0001)とは別物で、こちらで採番するもの
+//   ではない。内定者が書類提出を始める時点ではまだ決まっておらず、jinjerへの反映タイミングになって初めて
+//   決まる運用のため、HRが「設定 > 新入社員登録」の個別編集で事前に入力しておく必要がある
+//   (employee.JinjerEmployeeId。未入力ならこの関数はエラーで止める)
+// - 「従業員マスタ情報(氏名・配属先等)をjinjerに登録/更新する」エンドポイントは、実際に本番で動作確認できて
+//   いない(src/jinjer.tsのupsertEmployeeMaster参照)。社員はjinjer側で登録済みの前提のため、素性不明な
+//   "登録"系APIを本番の既存社員に対して呼ぶリスクを避け、現時点では呼び出さない(動作確認が取れ次第対応する)
+// - jinjerの緊急連絡先の登録APIは「登録」専用で、同じ人に何度送っても新規追加されてしまい、更新・上書きの
+//   手段が無いことを確認済み(src/jinjer.ts先頭のコメント参照)。そのため、employee.JinjerSyncedAtが
+//   未設定(＝このボタンを押すのが初めて)の場合にのみ送信する(重複登録の防止)
 export async function adminSyncToJinjer(env: Env, email: string, employeeId: string) {
   await requireAdmin(env, email);
   const employee = await findEmployeeById(env.DB, employeeId);
   if (!employee) throw new ApiError('新入社員情報が見つかりません');
-  const { baseUrl, apiKey } = await requireJinjerConfig(env);
+  if (!employee.JinjerEmployeeId) {
+    throw new ApiError('jinjerの社員番号が未設定です（設定 > 新入社員登録の個別編集で入力してください）');
+  }
+  if (employee.JinjerSyncedAt) {
+    throw new ApiError('この方の緊急連絡先は送信済みです（jinjer側は重複登録防止のため再送信できません）');
+  }
+  const { baseUrl, accessToken } = await requireJinjerConfig(env);
 
-  const { jinjerEmployeeId } = await upsertEmployeeMaster(baseUrl, apiKey, {
-    code: employee.EmployeeId,
-    name: employee.Name,
-    kana: employee.Kana,
-    company: employee.Company,
-    hireDate: employee.HireDate,
-    jobType: employee.JobType
-  });
-  await markJinjerSynced(env.DB, employeeId, jinjerEmployeeId, nowStr());
-  await appendHistory(env.DB, employeeId, '', 'jinjer同期', '従業員マスタ情報をjinjerに登録/更新', email);
+  const contacts = await listEmergencyContacts(env.DB, employeeId);
+  if (!contacts.length) throw new ApiError('緊急連絡先が登録されていません');
+
+  for (const c of contacts) {
+    const nationalLocalGovernmentCode = (await findMunicipalityCode(env.DB, c.Prefecture, c.City)) ?? undefined;
+    await syncEmergencyContact(baseUrl, accessToken, employee.JinjerEmployeeId, {
+      lastName: c.LastName,
+      firstName: c.FirstName,
+      lastNameKana: c.LastNameKana,
+      firstNameKana: c.FirstNameKana,
+      phoneNumber: c.PhoneNumber,
+      postalCode: c.PostalCode,
+      addressKana: c.AddressKana,
+      addressLine: c.AddressLine,
+      building: c.Building,
+      email: c.Email,
+      relationshipId: resolveRelationshipId(c.Relationship),
+      nationalLocalGovernmentCode
+    });
+  }
+
+  await markJinjerSynced(env.DB, employeeId, nowStr());
+  await appendHistory(env.DB, employeeId, '', 'jinjer同期', `緊急連絡先${contacts.length}件をjinjerに登録`, email);
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 
@@ -440,7 +495,10 @@ export async function adminSendFilesToJinjer(env: Env, email: string, employeeId
   await requireAdmin(env, email);
   const employee = await findEmployeeById(env.DB, employeeId);
   if (!employee) throw new ApiError('新入社員情報が見つかりません');
-  const { baseUrl, apiKey } = await requireJinjerConfig(env);
+  if (!employee.JinjerEmployeeId) {
+    throw new ApiError('jinjerの社員番号が未設定です（設定 > 新入社員登録の個別編集で入力してください）');
+  }
+  const { baseUrl, accessToken } = await requireJinjerConfig(env);
 
   const docTypes = await loadDocTypes(env.DB);
   const subs = await getSubmissionsMap(env.DB, employeeId);
@@ -456,8 +514,8 @@ export async function adminSendFilesToJinjer(env: Env, email: string, employeeId
     const sub = subs[d.key];
     const obj = await getEmployeeFile(env.DOCS, sub.StorageKey);
     if (!obj) continue;
-    await attachFile(baseUrl, apiKey, {
-      employeeId: employee.EmployeeId,
+    await attachFile(baseUrl, accessToken, {
+      employeeId: employee.JinjerEmployeeId,
       customItemCode: d.jinjerCustomItemCode!,
       fileName: `${employee.Name}_${d.label}`,
       mimeType: sub.MimeType || 'application/octet-stream',
@@ -499,6 +557,8 @@ export async function settingsGet(env: Env, email: string) {
   await requireAdmin(env, email);
   const token = await getSetting(env.DB, SETTINGS_KEYS.LINE_CHANNEL_ACCESS_TOKEN);
   const secret = await getSetting(env.DB, SETTINGS_KEYS.LINE_CHANNEL_SECRET);
+  const jinjerApiKey = await getSetting(env.DB, SETTINGS_KEYS.JINJER_API_KEY);
+  const jinjerSecretKey = await getSetting(env.DB, SETTINGS_KEYS.JINJER_API_SECRET_KEY);
   const admins = await listAdmins(env.DB);
   const me = admins.find((a) => a.Email === email);
   return {
@@ -511,6 +571,9 @@ export async function settingsGet(env: Env, email: string) {
     driveRootFolderId: await getSetting(env.DB, SETTINGS_KEYS.DRIVE_ROOT_FOLDER_ID),
     jinjerApiBaseUrl: await getSetting(env.DB, SETTINGS_KEYS.JINJER_API_BASE_URL),
     jinjerCompanyId: await getSetting(env.DB, SETTINGS_KEYS.JINJER_COMPANY_ID),
+    jinjerApiKeyMasked: jinjerApiKey ? `設定済み（末尾: …${jinjerApiKey.slice(-4)}）` : '未設定',
+    jinjerApiSecretKeyMasked: jinjerSecretKey ? `設定済み（末尾: …${jinjerSecretKey.slice(-4)}）` : '未設定',
+    jinjerMunicipalityCount: await countMunicipalities(env.DB),
     admins,
     rejectTemplates: await listTemplates(env.DB, 'reject'),
     reminderTemplates: await listTemplates(env.DB, 'reminder'),
@@ -523,7 +586,9 @@ export async function settingsGet(env: Env, email: string) {
       jobType: e.JobType,
       company: e.Company,
       hireDate: e.HireDate,
-      linked: !!e.LineUserId
+      linked: !!e.LineUserId,
+      jinjerEmployeeId: e.JinjerEmployeeId || '',
+      jinjerSyncedAt: e.JinjerSyncedAt || ''
     })),
     companies: COMPANIES,
     commutes: COMMUTES
@@ -559,7 +624,8 @@ export async function settingsUpdateEmployee(
   name: string,
   kana: string,
   jobType: string,
-  hireDate: string
+  hireDate: string,
+  jinjerEmployeeId?: string
 ) {
   await requirePermission(env, email, 'emp');
   const existing = await findEmployeeById(env.DB, employeeId);
@@ -577,6 +643,7 @@ export async function settingsUpdateEmployee(
     Company: companyMap[trimmedJobType] || existing.Company,
     HireDate: (hireDate || '').toString().trim()
   });
+  await setJinjerEmployeeId(env.DB, employeeId, (jinjerEmployeeId || '').toString().trim());
   return settingsGet(env, email);
 }
 
@@ -600,6 +667,32 @@ export async function settingsBulkAddEmployees(env: Env, email: string, rows: Bu
   if (withIds.length) await saveEmployees(env.DB, withIds);
 
   return { added: withIds.map((e) => ({ employeeId: e.EmployeeId, name: e.Name })), errors };
+}
+
+// CSV/Excelから「社員番号(jinjer側)」と「氏名」の組を読み込み、氏名の完全一致で新入社員一覧と紐付ける。
+// 名前が一致しない/複数一致する行はエラーとして報告し、個別編集での対応を促す(誤った相手に紐付けないため)。
+type BulkJinjerLinkRow = { 社員番号?: string | number; JinjerEmployeeId?: string | number; 氏名?: string; Name?: string };
+
+export async function settingsBulkLinkJinjerEmployees(env: Env, email: string, rows: BulkJinjerLinkRow[]) {
+  await requirePermission(env, email, 'emp');
+  const employees = await listEmployees(env.DB);
+  const linked: { name: string; jinjerEmployeeId: string }[] = [];
+  const errors: { row: number; reason: string }[] = [];
+
+  for (let i = 0; i < (rows || []).length; i++) {
+    const row = rows[i];
+    const name = (row['氏名'] || row['Name'] || '').toString().trim();
+    const jinjerEmployeeId = (row['社員番号'] || row['JinjerEmployeeId'] || '').toString().trim();
+    if (!name) { errors.push({ row: i + 2, reason: '氏名が空です' }); continue; }
+    if (!jinjerEmployeeId) { errors.push({ row: i + 2, reason: '社員番号が空です' }); continue; }
+    const matches = employees.filter((e) => e.Name.trim() === name);
+    if (matches.length === 0) { errors.push({ row: i + 2, reason: `「${name}」に一致する新入社員が見つかりません` }); continue; }
+    if (matches.length > 1) { errors.push({ row: i + 2, reason: `「${name}」に一致する新入社員が複数いるため、個別編集で設定してください` }); continue; }
+    await setJinjerEmployeeId(env.DB, matches[0].EmployeeId, jinjerEmployeeId);
+    linked.push({ name, jinjerEmployeeId });
+  }
+
+  return { linked, errors };
 }
 
 export async function settingsBulkSetHireDate(env: Env, email: string, hireDate: string) {
@@ -715,13 +808,23 @@ export async function settingsSaveDriveConfig(env: Env, email: string, rootFolde
 }
 
 // ---------- jinjer連携設定 ----------
-// APIキーはここでは扱わない(wrangler secretで別途設定)。ここはベースURL・会社IDのみ。
+// LINEチャネルアクセストークンと同じ扱いで、APIキーもsettingsテーブルに保存する(空欄で保存した場合は
+// 既存の値を維持する。マスク表示中に誤って空欄のまま上書き保存してしまうのを防ぐため)。
 
-export async function settingsSaveJinjerConfig(env: Env, email: string, baseUrl: string, companyId: string) {
+export async function settingsSaveJinjerConfig(
+  env: Env,
+  email: string,
+  baseUrl: string,
+  companyId: string,
+  apiKey?: string,
+  secretKey?: string
+) {
   await requirePermission(env, email, 'jinjer');
   await setSettings(env.DB, {
     [SETTINGS_KEYS.JINJER_API_BASE_URL]: (baseUrl || '').trim(),
-    [SETTINGS_KEYS.JINJER_COMPANY_ID]: (companyId || '').trim()
+    [SETTINGS_KEYS.JINJER_COMPANY_ID]: (companyId || '').trim(),
+    ...(apiKey ? { [SETTINGS_KEYS.JINJER_API_KEY]: apiKey.trim() } : {}),
+    ...(secretKey ? { [SETTINGS_KEYS.JINJER_API_SECRET_KEY]: secretKey.trim() } : {})
   });
   return settingsGet(env, email);
 }

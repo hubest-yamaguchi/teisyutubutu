@@ -506,9 +506,11 @@
         (e.driveSavedAt ? '<p><span class="status-pill" style="background:#E9F5EA;color:#3F9142;">Drive保存済み ' + e.driveSavedAt + '</span></p>' : '') +
         '<button class="btn ghost" id="driveSaveBtn" onclick="saveToDrive()">承認済み書類をDriveに保存</button>' +
         '<hr><h3>jinjer連携</h3>' +
-        '<p class="muted">氏名・フリガナ・配属先などの従業員マスタ情報をjinjerに登録/更新します。承認済み書類のファイル送信は、書類マスタでjinjerカスタム項目コードを設定した書類のみが対象です。</p>' +
-        (e.jinjerSyncedAt ? '<p><span class="status-pill" style="background:#E9F5EA;color:#3F9142;">jinjer同期済み ' + e.jinjerSyncedAt + '</span></p>' : '') +
-        '<button class="btn ghost" id="jinjerSyncBtn" onclick="syncToJinjer()">jinjerに登録/更新</button> ' +
+        '<p class="muted">緊急連絡先をjinjerに登録します（続柄・都道府県/市区町村は分かる範囲でコードを引き当てます）。' +
+        (e.jinjerEmployeeId ? 'jinjer社員番号: ' + e.jinjerEmployeeId : '<b style="color:#C4881B;">jinjer社員番号が未設定です（「設定」＞「新入社員登録」で入力してください）</b>') +
+        '。jinjer側は登録専用（更新不可）のため、送信は1回のみ行えます。承認済み書類のファイル送信は、書類マスタでjinjerカスタム項目コードを設定した書類のみが対象です。</p>' +
+        (e.jinjerSyncedAt ? '<p><span class="status-pill" style="background:#E9F5EA;color:#3F9142;">緊急連絡先 送信済み ' + e.jinjerSyncedAt + '</span></p>' : '') +
+        '<button class="btn ghost" id="jinjerSyncBtn" onclick="syncToJinjer()"' + (e.jinjerSyncedAt ? ' disabled' : '') + '>緊急連絡先をjinjerに登録</button> ' +
         '<button class="btn ghost" id="jinjerFilesBtn" onclick="sendFilesToJinjer()">承認済み書類をjinjerに送る</button>' +
         '<hr><h3>リマインダー送信</h3>' +
         '<div class="row-flex" id="reminderTpl"></div>' +
@@ -1012,17 +1014,25 @@
         '<div class="row-flex"><input type="date" id="bulkHireDate" style="width:160px;">' +
         '<button class="btn ghost" onclick="bulkSetHireDate()">全員に一括設定</button></div>' +
         '<div id="bulkHireDateResult" class="muted" style="margin-top:8px;"></div>' +
+        '<hr style="margin:16px 0;border:none;border-top:1px solid #EEF0F1;">' +
+        '<h3 style="font-size:.9rem;">jinjer社員番号をCSV／Excelから一括紐付け</h3>' +
+        '<p class="muted">列名：社員番号・氏名（1行目は見出し）。氏名が完全一致する新入社員に、jinjerの社員番号を紐付けます。' +
+        '一致しない・複数一致する行はエラーとして表示するので、個別編集で対応してください。</p>' +
+        '<input type="file" id="bulkJinjerFile" accept=".csv,.xlsx,.xls">' +
+        '<div style="height:8px;"></div><button class="btn" onclick="bulkLinkJinjerEmployees()">ファイルから一括紐付け</button>' +
+        '<div id="bulkJinjerResult" class="muted" style="margin-top:8px;"></div>' +
         '</div>' +
         '<div class="card"><h2>登録済みの新入社員一覧</h2>' +
         '<p class="muted">氏名・フリガナ・職種・入社予定日は「編集」から社員ごとに個別修正できます。テスト登録などを取り消したい場合は「削除」してください（提出済みの書類・履歴も一緒に削除されます）。</p>' +
-        '<table><thead><tr><th>氏名</th><th>フリガナ</th><th>職種</th><th>配属先</th><th>入社予定日</th><th>LINE連携</th><th></th></tr></thead><tbody>' +
+        '<table><thead><tr><th>氏名</th><th>フリガナ</th><th>職種</th><th>配属先</th><th>入社予定日</th><th>LINE連携</th><th>jinjer社員番号</th><th></th></tr></thead><tbody>' +
         (s.employees.length ? s.employees.map(function (emp) {
           return '<tr><td>' + emp.name + '</td><td>' + emp.kana + '</td><td>' + (emp.jobType || '-') + '</td><td>' + (emp.company || '未回答') + '</td>' +
             '<td>' + (emp.hireDate || '未設定') + '</td>' +
             '<td>' + (emp.linked ? '連携済み' : '未連携') + '</td>' +
+            '<td>' + (emp.jinjerEmployeeId || '未設定') + (emp.jinjerSyncedAt ? '<div class="muted">送信済み ' + emp.jinjerSyncedAt + '</div>' : '') + '</td>' +
             '<td><button class="btn ghost" onclick="toggleEditEmployee(\'' + emp.id + '\')">編集</button> ' +
             '<button class="btn danger" onclick="removeEmployee(\'' + emp.id + '\',\'' + escAttr(emp.name) + '\')">削除</button></td></tr>' +
-            '<tr id="editEmp-' + emp.id + '" style="display:none;"><td colspan="7">' +
+            '<tr id="editEmp-' + emp.id + '" style="display:none;"><td colspan="8">' +
             '<div class="row-flex">' +
             '<input type="text" id="editEmpName-' + emp.id + '" value="' + escAttr(emp.name) + '" placeholder="氏名" style="width:120px;">' +
             '<input type="text" id="editEmpKana-' + emp.id + '" value="' + escAttr(emp.kana) + '" placeholder="フリガナ" style="width:120px;">' +
@@ -1030,6 +1040,7 @@
             Object.keys(s.jobTypeCompanyMap).map(function (j) { return '<option value="' + escAttr(j) + '"' + (j === emp.jobType ? ' selected' : '') + '>' + j + '</option>'; }).join('') +
             '</select>' +
             '<input type="date" id="editEmpHireDate-' + emp.id + '" value="' + escAttr(emp.hireDate || '') + '" style="width:160px;">' +
+            '<input type="text" id="editEmpJinjerId-' + emp.id + '" value="' + escAttr(emp.jinjerEmployeeId || '') + '" placeholder="jinjer社員番号" style="width:140px;">' +
             '</div>' +
             '<div style="height:8px;"></div><button class="btn" onclick="saveEmployeeEdit(\'' + emp.id + '\')">この内容で保存</button>' +
             '</td></tr>';
@@ -1123,14 +1134,26 @@
       // jinjer連携設定
       if (cat === 'jinjer') return (
         '<div class="card"><h2>jinjer連携設定</h2>' +
-        '<p class="muted">APIキーは機微情報のためこの画面では扱わず、サーバー側にWorker secretとして別途設定します。' +
-        '認証方式・エンドポイントは開発者ガイド確認後に確定するため、現時点は骨組みです。</p>' +
+        '<p class="muted">従業員マスタ登録・ファイル添付の一部エンドポイントは未確認ですが、認証方式と緊急連絡先の登録・住所/続柄コードの引き当ては本番環境で動作確認済みです。</p>' +
         '<label class="muted">APIベースURL</label>' +
         '<input type="text" id="jinjerApiBaseUrl" value="' + escAttr(s.jinjerApiBaseUrl || '') + '" placeholder="例: https://api.jinjer.biz">' +
         '<div style="height:8px;"></div>' +
         '<label class="muted">会社ID（必要な場合）</label>' +
         '<input type="text" id="jinjerCompanyId" value="' + escAttr(s.jinjerCompanyId || '') + '">' +
-        '<div style="height:8px;"></div><button class="btn" onclick="saveJinjerConfig()">保存</button></div>' +
+        '<div style="height:8px;"></div>' +
+        '<label class="muted">APIキー（現在: ' + s.jinjerApiKeyMasked + '）</label>' +
+        '<input type="text" id="jinjerApiKey" placeholder="新しいAPIキーを入力（変更する場合のみ）">' +
+        '<div style="height:8px;"></div>' +
+        '<label class="muted">APIシークレットキー（現在: ' + s.jinjerApiSecretKeyMasked + '）</label>' +
+        '<input type="text" id="jinjerApiSecretKey" placeholder="新しいシークレットキーを入力（変更する場合のみ）">' +
+        '<div style="height:8px;"></div><button class="btn" onclick="saveJinjerConfig()">保存</button> ' +
+        '<button class="btn ghost" onclick="testJinjerConnection()">接続テスト</button>' +
+        '<div id="jinjerTestResult" style="margin-top:8px;"></div></div>' +
+        '<div class="card"><h2>市区町村マスタの同期</h2>' +
+        '<p class="muted">緊急連絡先の住所（都道府県/市区町村）をjinjerの全国地方公共団体コードに変換するためのマスタデータです。' +
+        '現在' + s.jinjerMunicipalityCount + '件キャッシュ済み。全国の市区町村の統廃合はごく稀なため、初回に一度実行すれば基本的に十分です。</p>' +
+        '<button class="btn ghost" onclick="syncJinjerMunicipalities()">市区町村マスタを同期</button>' +
+        '<div id="jinjerMunicipalityResult" style="margin-top:8px;"></div></div>' +
         '<div class="card"><h2>書類のjinjer送信対象</h2>' +
         '<p class="muted">承認済み書類をjinjerにファイル添付するには、「書類マスタ」で書類ごとにjinjerカスタム項目コードを設定してください（未設定の書類は送信対象外になります）。' +
         'カスタム項目自体はjinjer側の管理画面で先に作成しておく必要があります。</p></div>'
@@ -1212,10 +1235,32 @@
         .then(renderSettingsAndToast_).catch(showError);
     }
 
+    function testJinjerConnection() {
+      var el = document.getElementById('jinjerTestResult');
+      el.innerHTML = '<p class="muted">確認中…</p>';
+      callServer_('adminTestJinjerConnection', []).then(function () {
+        el.innerHTML = '<p style="color:#3F9142;">接続に成功しました（アクセストークンを取得できました）</p>';
+      }).catch(function (err) {
+        el.innerHTML = '<p style="color:#C1443A;">' + (err && err.message ? err.message : String(err)) + '</p>';
+      });
+    }
+
+    function syncJinjerMunicipalities() {
+      var el = document.getElementById('jinjerMunicipalityResult');
+      el.innerHTML = '<p class="muted">同期中…（20リクエスト前後かかるため少し時間がかかります）</p>';
+      callServer_('adminSyncJinjerMunicipalities', []).then(function (res) {
+        el.innerHTML = '<p style="color:#3F9142;">' + res.count + '件を同期しました</p>';
+      }).catch(function (err) {
+        el.innerHTML = '<p style="color:#C1443A;">' + (err && err.message ? err.message : String(err)) + '</p>';
+      });
+    }
+
     function saveJinjerConfig() {
       callServer_('settingsSaveJinjerConfig', [
         document.getElementById('jinjerApiBaseUrl').value.trim(),
-        document.getElementById('jinjerCompanyId').value.trim()
+        document.getElementById('jinjerCompanyId').value.trim(),
+        document.getElementById('jinjerApiKey').value.trim(),
+        document.getElementById('jinjerApiSecretKey').value.trim()
       ]).then(renderSettingsAndToast_).catch(showError);
     }
 
@@ -1316,7 +1361,8 @@
         document.getElementById('editEmpName-' + id).value.trim(),
         document.getElementById('editEmpKana-' + id).value.trim(),
         document.getElementById('editEmpJobType-' + id).value,
-        document.getElementById('editEmpHireDate-' + id).value
+        document.getElementById('editEmpHireDate-' + id).value,
+        document.getElementById('editEmpJinjerId-' + id).value.trim()
       ]).then(renderSettingsAndToast_).catch(showError);
     }
 
@@ -1346,11 +1392,37 @@
       var resultEl = document.getElementById('bulkEmpResult');
       if (!file) { resultEl.textContent = 'ファイルを選択してください'; return; }
       resultEl.textContent = '読み込み中…';
-      ensureSheetJs().then(function () { parseAndSendBulk_(file, resultEl); })
-        .catch(function (err) { resultEl.textContent = String(err && err.message || err); });
+      ensureSheetJs().then(function () {
+        parseAndSendBulk_(file, resultEl, 'settingsBulkAddEmployees', function (res) {
+          var msg = res.added.length + '件登録しました。';
+          if (res.errors.length) {
+            msg += ' エラー ' + res.errors.length + '件：' + res.errors.map(function (er) { return er.row + '行目: ' + er.reason; }).join(' / ');
+          }
+          return msg;
+        });
+      }).catch(function (err) { resultEl.textContent = String(err && err.message || err); });
     }
 
-    function parseAndSendBulk_(file, resultEl) {
+    function bulkLinkJinjerEmployees() {
+      var input = document.getElementById('bulkJinjerFile');
+      var file = input.files[0];
+      var resultEl = document.getElementById('bulkJinjerResult');
+      if (!file) { resultEl.textContent = 'ファイルを選択してください'; return; }
+      resultEl.textContent = '読み込み中…';
+      ensureSheetJs().then(function () {
+        parseAndSendBulk_(file, resultEl, 'settingsBulkLinkJinjerEmployees', function (res) {
+          var msg = res.linked.length + '件紐付けました。';
+          if (res.errors.length) {
+            msg += ' エラー ' + res.errors.length + '件：' + res.errors.map(function (er) { return er.row + '行目: ' + er.reason; }).join(' / ');
+          }
+          return msg;
+        });
+      }).catch(function (err) { resultEl.textContent = String(err && err.message || err); });
+    }
+
+    // Excel/CSVを読み込んでサーバーの一括処理関数fnNameに投げる共通処理。
+    // formatResult(res) はサーバーからの結果を画面表示用の文字列に整形する。
+    function parseAndSendBulk_(file, resultEl, fnName, formatResult) {
       var reader = new FileReader();
       reader.onload = function (e) {
         try {
@@ -1359,12 +1431,8 @@
           var firstSheet = workbook.Sheets[workbook.SheetNames[0]];
           var rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
           if (!rows.length) { resultEl.textContent = 'データ行が見つかりませんでした'; return; }
-          callServer_('settingsBulkAddEmployees', [rows]).then(function (res) {
-            var msg = res.added.length + '件登録しました。';
-            if (res.errors.length) {
-              msg += ' エラー ' + res.errors.length + '件：' + res.errors.map(function (er) { return er.row + '行目: ' + er.reason; }).join(' / ');
-            }
-            resultEl.textContent = msg;
+          callServer_(fnName, [rows]).then(function (res) {
+            resultEl.textContent = formatResult(res);
           }).catch(showError);
         } catch (err) {
           resultEl.textContent = 'ファイルの読み込みに失敗しました: ' + err;
