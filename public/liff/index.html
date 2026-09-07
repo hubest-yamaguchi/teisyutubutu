@@ -127,7 +127,7 @@
 
     // デモモード用の固定データ。DOC_TYPES(model.ts)の全ステータス・全条件パターンを一通り見せる。
     var DEMO_JOB_TYPES = ['整備士', '営業職', '事務職'];
-    var DEMO_EMPLOYEE = { id: 'DEMO0001', name: '山田 太郎', company: 'ホンダカーズ佐賀', commute: '車', hireDate: '2026-10-01' };
+    var DEMO_EMPLOYEE = { id: 'DEMO0001', name: '山田 太郎', company: 'ホンダカーズ佐賀', commute: '車', hasLicense: '', hireDate: '2026-10-01' };
     var DEMO_EMERGENCY_CONTACTS = [];
     var DEMO_DOCS = [
       { key: 'guarantor', label: '身元保証書', description: '内定者本人と保証人が記入する書類です。必ずボールペンで記入してください。', requiresOriginal: true, pdfAllowed: false, status: '原本提出待ち', submittedAt: '2026-08-20', rejectReason: '', rejectedAt: '' },
@@ -136,7 +136,15 @@
       { key: 'residence', label: '住民票', description: '「住民票謄本」(世帯全員が記載されたもの)を提出してください。', requiresOriginal: false, pdfAllowed: false, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
       { key: 'health', label: '健康診断書', description: '直近1年以内に受診したものを提出してください。', requiresOriginal: false, pdfAllowed: true, status: '差し戻し', submittedAt: '2026-08-15', rejectReason: '画像が不鮮明です。文字がはっきり読める写真を再度アップロードしてください。', rejectedAt: '2026-08-16' },
       { key: 'withholding', label: '源泉徴収票(前職分)', description: '前職やアルバイト先がある方が対象です。', requiresOriginal: false, pdfAllowed: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
-      { key: 'carInsurance', label: '運転免許証・自動車保険証の写し', description: '車で通勤される方が対象です。', requiresOriginal: false, pdfAllowed: false, status: '承認済', submittedAt: '2026-08-19', rejectReason: '', rejectedAt: '' },
+      { key: 'graduationCertificate', label: '卒業証明書', description: '卒業した学校が発行する「卒業証明書」を提出してください（高校卒業の方は「卒業証書」のコピーでも可）。', requiresOriginal: false, pdfAllowed: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'carRegistration', label: '車検証の写し', description: '車で通勤される方が対象です。', requiresOriginal: false, pdfAllowed: false, status: '承認済', submittedAt: '2026-08-19', rejectReason: '', rejectedAt: '' },
+      { key: 'carInsurance', label: '自動車保険証券の写し', description: '車で通勤される方が対象です。', requiresOriginal: false, pdfAllowed: false, status: '承認済', submittedAt: '2026-08-19', rejectReason: '', rejectedAt: '' },
+      { key: 'licenseFront', label: '運転免許証（表面）', description: '運転免許証をお持ちの方が対象です。', requiresOriginal: false, pdfAllowed: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'licenseBack', label: '運転免許証（裏面）', description: '運転免許証をお持ちの方が対象です。', requiresOriginal: false, pdfAllowed: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'certificate1', label: '資格証明書（1）', description: 'お持ちの資格・免許があれば提出してください(任意)。', requiresOriginal: false, pdfAllowed: false, optional: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'certificate2', label: '資格証明書（2）', description: '2件目がある場合のみ(任意)。', requiresOriginal: false, pdfAllowed: false, optional: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'certificate3', label: '資格証明書（3）', description: '3件目がある場合のみ(任意)。', requiresOriginal: false, pdfAllowed: false, optional: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'disabilityHandbook', label: '障害者手帳の写し', description: 'お持ちの場合のみ提出してください(任意)。', requiresOriginal: false, pdfAllowed: false, optional: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
       { key: 'bikeInsurance', label: '自転車保険証の写し', description: '', requiresOriginal: false, pdfAllowed: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' },
       { key: 'leaseContract', label: '賃貸借契約書の写し', description: '', requiresOriginal: false, pdfAllowed: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' }
     ];
@@ -144,13 +152,16 @@
     function demoPayload() {
       var commutes = STATE.commutes.length ? STATE.commutes : ['車', '自転車', '電車・バス・徒歩'];
       var applicable = DEMO_DOCS.filter(function (d) { return d.status !== '対象外'; });
-      var done = applicable.filter(function (d) { return d.status !== '未提出'; }).length;
+      var optionalKeys = ['certificate1', 'certificate2', 'certificate3', 'disabilityHandbook'];
+      var relevant = applicable.filter(function (d) { return optionalKeys.indexOf(d.key) === -1 || d.status !== '未提出'; });
+      var done = relevant.filter(function (d) { return d.status !== '未提出'; }).length;
       return {
         ok: true, matched: true, needsCommute: false,
         needsEmergencyContact: !DEMO_EMERGENCY_CONTACTS.length,
+        needsLicenseAnswer: !DEMO_EMPLOYEE.hasLicense,
         employee: DEMO_EMPLOYEE, companies: [], commutes: commutes,
         emergencyContacts: DEMO_EMERGENCY_CONTACTS,
-        docs: DEMO_DOCS, progressPct: applicable.length ? Math.round((done / applicable.length) * 100) : 100,
+        docs: DEMO_DOCS, progressPct: relevant.length ? Math.round((done / relevant.length) * 100) : 100,
         stage: '確認中'
       };
     }
@@ -162,8 +173,13 @@
         hideOverlay();
         if (fn === 'findByKana') return { employeeId: DEMO_EMPLOYEE.id, name: DEMO_EMPLOYEE.name, kana: 'ヤマダ タロウ', jobType: DEMO_JOB_TYPES[0], company: DEMO_EMPLOYEE.company };
         if (fn === 'confirmBind') return { ok: true, matched: true, needsCommute: true, employee: DEMO_EMPLOYEE, companies: [], commutes: ['車', '自転車', '電車・バス・徒歩'], docs: [], progressPct: 0, stage: '未提出' };
-        if (fn === 'saveCommute') {
+        if (fn === 'saveProfile') {
           DEMO_EMPLOYEE.commute = args[2];
+          DEMO_EMPLOYEE.hasLicense = args[3];
+          var frontBack = ['licenseFront', 'licenseBack'];
+          DEMO_DOCS.forEach(function (d) {
+            if (frontBack.indexOf(d.key) !== -1) d.status = args[3] === 'あり' ? '未提出' : '対象外';
+          });
           return demoPayload();
         }
         if (fn === 'saveEmergencyContacts') {
@@ -272,28 +288,45 @@
         '<p class="muted">お手数ですが総務課へご連絡ください。</p></div>');
     }
 
-    // 初回(または変更時)に本人が回答する：通勤手段(書類提出に必要な条件のため、書類一覧の前に確認する)
+    // 初回(または変更時)に本人が回答する：通勤手段・運転免許証の有無(どちらも書類提出に必要な条件のため、
+    // 通勤手段の値に関わらず運転免許証の有無も必須の質問として、1つのフォームでまとめて確認する)
     function renderCommuteForm(res) {
       var e = (res && res.employee) || STATE.employee || {};
       var opts = '<option value="">選択してください</option>' + STATE.commutes.map(function (v) {
         return '<option value="' + v + '"' + (v === e.commute ? ' selected' : '') + '>' + v + '</option>';
       }).join('');
+      var lic = e.hasLicense || '';
       render(
-        '<div class="card"><h2>' + (e.name || '') + 'さん、通勤手段を教えてください</h2>' +
+        '<div class="card"><h2>' + (e.name || '') + 'さん、いくつか質問にお答えください</h2>' +
         '<p class="muted">回答内容によって、提出していただく書類が決まります。</p>' +
         '<label class="muted">通勤手段</label>' +
         '<select id="cfCommute" style="width:100%;padding:10px;border:1px solid #DBE1DF;border-radius:8px;font-size:.9rem;margin:4px 0 12px;">' + opts + '</select>' +
+        '<label class="muted">運転免許証をお持ちですか？</label>' +
+        '<div id="cfLicenseButtons" style="margin:4px 0 12px;">' +
+        '<button type="button" onclick="selectLicenseOption_(\'あり\')" data-license-btn="あり" class="' + (lic === 'あり' ? '' : 'ghost') + '" style="width:auto;padding:8px 16px;margin-right:8px;">あり</button>' +
+        '<button type="button" onclick="selectLicenseOption_(\'なし\')" data-license-btn="なし" class="' + (lic === 'なし' ? '' : 'ghost') + '" style="width:auto;padding:8px 16px;">なし</button>' +
+        '</div>' +
+        '<input type="hidden" id="cfHasLicense" value="' + lic + '">' +
         '<button onclick="saveCommute()">この内容で進む</button>' +
         '<p id="cfStatus" class="muted" style="margin-top:8px;"></p></div>'
       );
     }
 
+    function selectLicenseOption_(value) {
+      document.getElementById('cfHasLicense').value = value;
+      document.querySelectorAll('#cfLicenseButtons button').forEach(function (b) {
+        b.className = (b.getAttribute('data-license-btn') === value) ? '' : 'ghost';
+      });
+    }
+
     function saveCommute() {
       var commute = document.getElementById('cfCommute').value;
+      var hasLicense = document.getElementById('cfHasLicense').value;
       var st = document.getElementById('cfStatus');
       if (!commute) { st.textContent = '通勤手段を選択してください'; return; }
+      if (!hasLicense) { st.textContent = '運転免許証の有無を選択してください'; return; }
       st.textContent = '保存中…';
-      callServer_('saveCommute', [STATE.employee.id, STATE.lineUserId, commute]).then(function (res) {
+      callServer_('saveProfile', [STATE.employee.id, STATE.lineUserId, commute, hasLicense]).then(function (res) {
         applyPayload(res);
       }).catch(showError);
     }
@@ -306,7 +339,8 @@
       STATE.commutes = res.commutes || STATE.commutes;
       STATE.emergencyContacts = res.emergencyContacts || [];
       STATE.needsEmergencyContact = !!res.needsEmergencyContact;
-      if (res.needsCommute) { renderCommuteForm(res); return; }
+      STATE.needsLicenseAnswer = !!res.needsLicenseAnswer;
+      if (res.needsCommute || res.needsLicenseAnswer) { renderCommuteForm(res); return; }
       renderList(res);
     }
 
@@ -545,15 +579,27 @@
 
     function renderList(res) {
       var e = STATE.employee;
-      var rows = res.docs.map(function (d) {
+      var rows = '';
+      var optionalHeaderShown = false;
+      res.docs.forEach(function (d) {
+        // 任意書類(資格証明書・障害者手帳など)は、対象の方だけが提出すればよいことが一目でわかるよう、
+        // 最初の1件の直前に区切り見出しを入れ、各行にも「任意」バッジを付ける。具体的な例(国家整備士資格・
+        // 宅建など)は見出しに一度だけ添え、詳しい説明は開いた時(openDoc)に表示する分だけに留めて
+        // リストが文章だらけにならないようにする
+        if (d.optional && !optionalHeaderShown) {
+          rows += '<div class="muted" style="padding:10px 2px 4px;font-size:.78rem;border-top:1px dashed #DBE1DF;margin-top:6px;">下記書類は対象の方のみ提出してください（例：国家整備士資格・宅建・障害者手帳など）</div>';
+          optionalHeaderShown = true;
+        }
         if (d.status === '対象外') {
-          return '<div class="doc-row na"><span>' + d.label + '</span><span class="pill st-対象外">対象外</span></div>';
+          rows += '<div class="doc-row na"><span>' + d.label + '</span><span class="pill st-対象外">対象外</span></div>';
+          return;
         }
         var clickable = (d.status === '未提出' || d.status === '差し戻し');
-        return '<div class="doc-row" onclick="' + (clickable ? "openDoc('" + d.key + "')" : '') + '">' +
-          '<span>' + d.label + (d.requiresOriginal ? '（原本）' : '') + '</span>' +
+        var optionalBadge = d.optional ? ' <span class="muted" style="font-size:.72rem;">（任意）</span>' : '';
+        rows += '<div class="doc-row" onclick="' + (clickable ? "openDoc('" + d.key + "')" : '') + '">' +
+          '<span>' + d.label + (d.requiresOriginal ? '（原本）' : '') + optionalBadge + '</span>' +
           '<span class="pill st-' + d.status + '">' + d.status + '</span></div>';
-      }).join('');
+      });
 
       var rejected = res.docs.filter(function (d) { return d.status === '差し戻し'; });
       var rejectedHtml = rejected.map(function (d) {
@@ -563,8 +609,11 @@
 
       render(
         '<div class="card"><h2>ようこそ、' + e.name + 'さん</h2>' +
-        '<p class="muted">' + e.company + '・' + e.commute + '・進捗 ' + res.progressPct + '%' +
-        ' <a href="#" onclick="renderCommuteForm({employee: STATE.employee}); return false;" style="color:#16867C;">変更</a></p></div>' +
+        '<p class="muted">' + e.company + '・進捗 ' + res.progressPct + '%</p></div>' +
+        '<div class="card"><h2>通勤手段・運転免許証の確認</h2>' +
+        '<div class="doc-row"><span>通勤手段: ' + e.commute + '</span></div>' +
+        '<div class="doc-row"><span>運転免許証: ' + e.hasLicense + '</span></div>' +
+        '<button class="ghost" style="width:auto;padding:6px 14px;font-size:.8rem;margin-top:6px;" onclick="renderCommuteForm({employee: STATE.employee}); return false;">変更する</button></div>' +
         '<div class="card">' + rows + '</div>' +
         rejectedHtml +
         '<div id="uploadArea"></div>' +

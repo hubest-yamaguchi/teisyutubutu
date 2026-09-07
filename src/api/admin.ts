@@ -18,7 +18,7 @@ import {
   setJinjerEmployeeId,
   Employee
 } from '../db/employees';
-import { getSubmissionsMap, getAllSubmissions, upsertSubmission } from '../db/submissions';
+import { getSubmissionsMap, getAllSubmissions, upsertSubmission, markJinjerSent } from '../db/submissions';
 import { listEmergencyContacts } from '../db/emergencyContacts';
 import { appendHistory } from '../db/history';
 import { loadDocTypes, seedCompanyDocumentConfigIfEmpty, upsertDocConfig, removeDocConfig } from '../db/docConfig';
@@ -52,7 +52,8 @@ import {
   syncEmergencyContact,
   resolveRelationshipId,
   listMunicipalities,
-  ensureAddibleCustomItemRecordCode
+  ensureAddibleCustomItemRecordCode,
+  createNewAddibleCustomItemRecordCode
 } from '../jinjer';
 import { replaceMunicipalities, findMunicipalityCode, countMunicipalities } from '../db/jinjerMunicipalities';
 import { listMessages, insertOutboundMessage, findMessageById, getUnrepliedCounts, getLatestMessages, LineMessageRow } from '../db/lineMessages';
@@ -92,6 +93,7 @@ function publicEmployee(employee: Employee) {
     name: employee.Name,
     company: employee.Company,
     commute: employee.Commute,
+    hasLicense: employee.HasLicense || '',
     hireDate: employee.HireDate,
     pictureUrl: employee.PictureUrl || '',
     driveSavedAt: employee.DriveSavedAt || '',
@@ -515,7 +517,18 @@ export async function adminSendFilesToJinjer(env: Env, email: string, employeeId
   // 「jinjerRecordCode」欄の意味: 空欄=record_code不要(項目羅列形式) / "auto"=既存レコードを使うか無ければ
   // 自動作成する(項目追加(横)形式で、どのレコードでもよい場合) / それ以外の値=そのまま手動指定として使う。
   // 同じメニューを共有する書類が複数あっても、自動解決は1メニューにつき1回だけ行い使い回す(重複作成防止)。
+  //
+  // 同じrecord_codeへ再送信すると既存ファイルが上書きされる(履歴が残らない)ことを実機で確認したため
+  // (src/jinjer.ts先頭のコメント参照)、前回jinjerに送信した時点のStorageKeyと現在のStorageKeyが異なる
+  // 書類(=差し戻し後に再提出・再承認された書類)は、既存レコードを使い回さず新しいレコードを作って送る。
+  // 同じメニューを共有する書類が同じタイミングで複数「再送信」対象になった場合は、新規レコードも
+  // 1メニューにつき1回だけ作って使い回す(newRecordCodeByMenu)。
+  // 【注意】この判定はJinjerSentStorageKey列(2026-09-07追加)の記録に基づくため、この列を追加する前に
+  // 本機能で実際にjinjerへ送信済みだった書類があると、そのStorageKeyの履歴が無く「未送信」と誤認され、
+  // 既存レコードに書き込む(=上書きする)側の分岐に入ってしまう。導入時点(2026-09-07)でsubmission_historyに
+  // 「jinjerファイル送信」の実行記録が無いことを確認済みのため、この時点では該当書類は存在しない。
   const autoRecordCodeByMenu = new Map<string, string>();
+  const newRecordCodeByMenu = new Map<string, string>();
   let sentCount = 0;
   for (const d of targets) {
     const sub = subs[d.key];
@@ -523,14 +536,22 @@ export async function adminSendFilesToJinjer(env: Env, email: string, employeeId
     if (!obj) continue;
     const extMatch = sub.StorageKey.match(/\.([^./]+)$/);
     const ext = extMatch ? `.${extMatch[1]}` : '';
+    const isResend = !!sub.JinjerSentStorageKey && sub.JinjerSentStorageKey !== sub.StorageKey;
 
     let recordCode = d.jinjerRecordCode || undefined;
     if (recordCode === 'auto') {
       const menuId = d.jinjerCustomMenuId!;
-      if (!autoRecordCodeByMenu.has(menuId)) {
-        autoRecordCodeByMenu.set(menuId, await ensureAddibleCustomItemRecordCode(baseUrl, accessToken, employee.JinjerEmployeeId, menuId));
+      if (isResend) {
+        if (!newRecordCodeByMenu.has(menuId)) {
+          newRecordCodeByMenu.set(menuId, await createNewAddibleCustomItemRecordCode(baseUrl, accessToken, employee.JinjerEmployeeId, menuId));
+        }
+        recordCode = newRecordCodeByMenu.get(menuId);
+      } else {
+        if (!autoRecordCodeByMenu.has(menuId)) {
+          autoRecordCodeByMenu.set(menuId, await ensureAddibleCustomItemRecordCode(baseUrl, accessToken, employee.JinjerEmployeeId, menuId));
+        }
+        recordCode = autoRecordCodeByMenu.get(menuId);
       }
-      recordCode = autoRecordCodeByMenu.get(menuId);
     }
 
     await attachFile(baseUrl, accessToken, {
@@ -541,6 +562,7 @@ export async function adminSendFilesToJinjer(env: Env, email: string, employeeId
       fileName: `${employee.Name}_${d.label}${ext}`,
       bytes: await obj.arrayBuffer()
     });
+    await markJinjerSent(env.DB, employeeId, d.key, sub.StorageKey);
     sentCount++;
   }
   if (!sentCount) throw new ApiError('送信対象のファイル実体が見つかりませんでした');

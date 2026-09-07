@@ -73,7 +73,7 @@ const LIFF_FUNCTIONS: Record<string, (env: Env, ...args: any[]) => Promise<unkno
   liffBind: liffApi.liffBind,
   findByKana: liffApi.findByKana,
   confirmBind: liffApi.confirmBind,
-  saveCommute: liffApi.saveCommute,
+  saveProfile: liffApi.saveProfile,
   saveEmergencyContacts: liffApi.saveEmergencyContactsApi,
   getMyDocuments: liffApi.getMyDocuments,
   submitDocument: liffApi.submitDocument,

@@ -6,6 +6,7 @@ export type Employee = {
   Kana: string;
   Company: string;
   Commute: string;
+  HasLicense?: string;
   HireDate: string;
   JobType: string;
   LineUserId: string;
@@ -44,11 +45,12 @@ export async function findUnlinkedEmployeesByKana(db: D1Database, kana: string):
 export async function saveEmployee(db: D1Database, employee: Employee): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO employees (EmployeeId, Name, Kana, Company, Commute, HireDate, JobType, LineUserId, PictureUrl)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO employees (EmployeeId, Name, Kana, Company, Commute, HasLicense, HireDate, JobType, LineUserId, PictureUrl)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(EmployeeId) DO UPDATE SET
          Name=excluded.Name, Kana=excluded.Kana, Company=excluded.Company, Commute=excluded.Commute,
-         HireDate=excluded.HireDate, JobType=excluded.JobType, LineUserId=excluded.LineUserId, PictureUrl=excluded.PictureUrl`
+         HasLicense=excluded.HasLicense, HireDate=excluded.HireDate, JobType=excluded.JobType,
+         LineUserId=excluded.LineUserId, PictureUrl=excluded.PictureUrl`
     )
     .bind(
       employee.EmployeeId,
@@ -56,6 +58,7 @@ export async function saveEmployee(db: D1Database, employee: Employee): Promise<
       employee.Kana ?? '',
       employee.Company ?? '',
       employee.Commute ?? '',
+      employee.HasLicense ?? '',
       employee.HireDate ?? '',
       employee.JobType ?? '',
       employee.LineUserId ?? '',

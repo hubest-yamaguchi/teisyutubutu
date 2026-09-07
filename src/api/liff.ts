@@ -21,6 +21,7 @@ function publicEmployee(employee: Employee) {
     name: employee.Name,
     company: employee.Company || '',
     commute: employee.Commute || '',
+    hasLicense: employee.HasLicense || '',
     hireDate: employee.HireDate || ''
   };
 }
@@ -32,15 +33,19 @@ function subsToStatusMap(subs: Record<string, { Status: string }>) {
 }
 
 async function buildDocumentsPayload(db: D1Database, employee: Employee) {
-  // 配属先(Company)は職種法人マスタから自動決定されるため、ここでは通勤手段の未回答だけを見る
+  // 配属先(Company)は職種法人マスタから自動決定されるため、ここでは通勤手段・運転免許証の有無の
+  // 未回答だけを見る。運転免許証の有無は通勤手段に関係なく全員必須の質問のため、どちらか一方でも
+  // 未回答なら通勤手段と同じ扱いで書類一覧をブロックする(1つの質問フォームでまとめて回答してもらう)。
   const needsCommute = !employee.Commute;
+  const needsLicenseAnswer = !employee.HasLicense;
   const base: any = {
     employee: publicEmployee(employee),
     needsCommute,
+    needsLicenseAnswer,
     companies: [], // COMPANIESはconditionのcompany判定にのみ使う内部値。画面はJobType経由なのでここでは空でよい
     commutes: COMMUTES
   };
-  if (needsCommute) {
+  if (needsCommute || needsLicenseAnswer) {
     base.docs = [];
     base.progressPct = 0;
     base.stage = '未提出';
@@ -65,6 +70,7 @@ async function buildDocumentsPayload(db: D1Database, employee: Employee) {
       requiresOriginal: !!d.requiresOriginal,
       pdfAllowed: !!d.pdfAllowed,
       sensitive: !!d.sensitive,
+      optional: !!d.optional,
       status: applicableFlag ? s.Status || STATUS.NONE : STATUS.NA,
       submittedAt: s.SubmittedAt || '',
       rejectReason: s.RejectReason || '',
@@ -158,17 +164,21 @@ export async function confirmBind(env: Env, employeeId: string, kana: string, li
   return payload;
 }
 
-export async function saveCommute(env: Env, eid: string, lineUserId: string, commute: string) {
+// 通勤手段・運転免許証の有無をまとめて回答する。運転免許証の有無は通勤手段に関係なく全員必須のため、
+// 通勤手段と同じ1つの質問フォームでまとめて答えてもらう(buildDocumentsPayloadのブロック条件と対応)。
+export async function saveProfile(env: Env, eid: string, lineUserId: string, commute: string, hasLicense: string) {
   const employee = await findEmployeeById(env.DB, eid);
   if (!employee) throw new ApiError('新入社員情報が見つかりません');
   if (!employee.LineUserId || employee.LineUserId !== lineUserId) {
     throw new ApiError('本人確認ができませんでした。LINEアプリから開き直してください。');
   }
   if (!(COMMUTES as readonly string[]).includes(commute)) throw new ApiError('通勤手段を選択してください');
+  if (hasLicense !== 'あり' && hasLicense !== 'なし') throw new ApiError('運転免許証の有無を選択してください');
 
   employee.Commute = commute;
+  employee.HasLicense = hasLicense;
   await saveEmployee(env.DB, employee);
-  await appendHistory(env.DB, eid, '', '通勤手段回答', `通勤手段: ${commute}`, '');
+  await appendHistory(env.DB, eid, '', '通勤手段・運転免許証回答', `通勤手段: ${commute} / 運転免許証: ${hasLicense}`, '');
 
   const payload = await buildDocumentsPayload(env.DB, employee);
   payload.ok = true;

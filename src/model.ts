@@ -4,7 +4,8 @@
 export const COMPANIES = ['ホンダカーズ佐賀', 'モビリティズ', 'たてものや', '佐賀バルーナーズ'] as const;
 export const COMMUTES = ['車', '自転車', '電車・バス・徒歩'] as const;
 
-export type DocCondition = { type: 'commute'; value: string };
+// 'commute'=通勤手段で絞る(値は「車」等)。'hasLicense'=運転免許証の有無で絞る(値は「あり」固定を想定)
+export type DocCondition = { type: 'commute' | 'hasLicense'; value: string };
 
 export type DocType = {
   key: string;
@@ -15,6 +16,9 @@ export type DocType = {
   condition?: DocCondition;
   companies?: string[]; // 空/未指定なら全社共通。指定した法人の内定者にのみ提出を求める
   description?: string;
+  // 資格証明書のように「対象ではあるが持っていない人もいる」書類向け。未提出のままでも進捗・完了判定を止めない
+  // (relevantDocTypes参照。提出した場合は通常の書類と同じく承認が必要)
+  optional?: boolean;
   // jinjer側に用意した「カスタム項目(ファイル形式)」のID。customMenuId/customItemIdの両方が空でない場合のみjinjer送信対象
   jinjerCustomMenuId?: string;
   jinjerCustomItemId?: string;
@@ -47,8 +51,48 @@ export const DOC_TYPES: DocType[] = [
     description: '前職やアルバイト先がある方が対象です。入社年の1月から入社前月までの期間に働いていた分を提出してください（その期間に就業していない場合は提出不要です）。複数の勤務先がある場合は、勤務先ごとに提出してください。ヒューベストグループ内でのアルバイト分は会社側で確認できるため提出不要です。'
   },
   {
-    key: 'carInsurance', label: '運転免許証・自動車保険証の写し', condition: { type: 'commute', value: '車' },
-    description: '車で通勤される方が対象です。通勤に使用する車の「車検証」と「自動車保険証券」（契約内容がわかるもの。保険契約書とは異なりますのでご注意ください）を提出してください。運転免許証をお持ちの場合はその写しもあわせて提出してください。'
+    key: 'graduationCertificate', label: '卒業証明書', pdfAllowed: true,
+    description: '卒業した学校が発行する「卒業証明書」を提出してください（高校卒業の方は「卒業証書」のコピーでも構いません）。学校の窓口や証明書発行システムで取得できます。'
+  },
+  {
+    key: 'carRegistration', label: '車検証の写し', condition: { type: 'commute', value: '車' },
+    description: '車で通勤される方が対象です。通勤に使用する車の車検証を提出してください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '2', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'carInsurance', label: '自動車保険証券の写し', condition: { type: 'commute', value: '車' },
+    description: '車で通勤される方が対象です。通勤に使用する車の自動車保険証券（契約内容がわかるもの。保険契約書とは異なりますのでご注意ください）を提出してください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '3', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'licenseFront', label: '運転免許証（表面）', condition: { type: 'hasLicense', value: 'あり' },
+    description: '運転免許証の表面（氏名・生年月日・免許証番号が記載されている面）の写しを提出してください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '18', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'licenseBack', label: '運転免許証（裏面）', condition: { type: 'hasLicense', value: 'あり' },
+    description: '運転免許証の裏面（本籍・条件等が記載されている面）の写しを提出してください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '19', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'certificate1', label: '資格証明書（1）', optional: true,
+    description: 'お持ちの資格・免許があれば証明書の写しを提出してください（国家整備士資格・宅地建物取引士（宅建）など。必須ではありません。お持ちでない場合は提出不要です）。最大3件まで登録できます。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '10', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'certificate2', label: '資格証明書（2）', optional: true,
+    description: '2件目の資格証明書（国家整備士資格・宅建など）がある場合は、こちらから提出してください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '11', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'certificate3', label: '資格証明書（3）', optional: true,
+    description: '3件目の資格証明書（国家整備士資格・宅建など）がある場合は、こちらから提出してください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '12', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'disabilityHandbook', label: '障害者手帳の写し', optional: true,
+    description: '障害者手帳をお持ちの場合は、写しを提出してください（必須ではありません。お持ちでない場合は提出不要です）。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '22', jinjerRecordCode: 'auto'
   },
   {
     key: 'bikeInsurance', label: '自転車保険証の写し', condition: { type: 'commute', value: '自転車' },
@@ -89,6 +133,7 @@ export type EmployeeLike = {
   EmployeeId?: string;
   Company?: string;
   Commute?: string;
+  HasLicense?: string;
 };
 
 export type DocStatusMap = Record<string, { status?: string }>;
@@ -97,11 +142,14 @@ export function docMeta(key: string, docTypes: DocType[] = DOC_TYPES): DocType |
   return docTypes.find((d) => d.key === key) ?? null;
 }
 
-// employeeはEmployees行相当(Company/Commuteはこの綴りのプロパティ名)を想定。
-// 配属先(companies)と通勤手段(condition)は独立した軸なので、両方の条件を満たす場合のみ対象とする。
+// employeeはEmployees行相当(Company/Commute/HasLicenseはこの綴りのプロパティ名)を想定。
+// 配属先(companies)・通勤手段・運転免許証の有無(condition)は独立した軸なので、すべての条件を満たす場合のみ対象とする。
 export function isApplicable(doc: DocType, employee: EmployeeLike): boolean {
   if (doc.companies && doc.companies.length > 0 && !doc.companies.includes(employee.Company || '')) return false;
-  if (doc.condition && doc.condition.type === 'commute') return employee.Commute === doc.condition.value;
+  if (doc.condition) {
+    if (doc.condition.type === 'commute') return employee.Commute === doc.condition.value;
+    if (doc.condition.type === 'hasLicense') return employee.HasLicense === doc.condition.value;
+  }
   return true;
 }
 
@@ -109,8 +157,17 @@ export function applicableDocTypes(employee: EmployeeLike, docTypes: DocType[] =
   return docTypes.filter((d) => isApplicable(d, employee));
 }
 
+// 進捗率・完了判定(受入準備完了かどうか)の対象となる書類。資格証明書のような任意(optional)の書類は、
+// 未提出(NONE)のままなら対象から除外する(持っていない人がずっと「未提出」のまま止まってしまうのを防ぐ)。
+// 提出済みになった場合は通常の書類と同じ扱いに戻り、承認されるまでは完了とみなさない。
+function relevantDocTypes(employee: EmployeeLike, docsByKey: DocStatusMap, docTypes: DocType[]): DocType[] {
+  return applicableDocTypes(employee, docTypes).filter(
+    (d) => !d.optional || (docsByKey[d.key]?.status || STATUS.NONE) !== STATUS.NONE
+  );
+}
+
 export function computeStage(employee: EmployeeLike, docsByKey: DocStatusMap, docTypes: DocType[] = DOC_TYPES): string {
-  const applicable = applicableDocTypes(employee, docTypes);
+  const applicable = relevantDocTypes(employee, docsByKey, docTypes);
   const statuses = applicable.map((d) => docsByKey[d.key]?.status || STATUS.NONE);
 
   if (statuses.includes(STATUS.REJECTED)) return '差し戻し';
@@ -126,7 +183,7 @@ export function computeStage(employee: EmployeeLike, docsByKey: DocStatusMap, do
 }
 
 export function progressPct(employee: EmployeeLike, docsByKey: DocStatusMap, docTypes: DocType[] = DOC_TYPES): number {
-  const applicable = applicableDocTypes(employee, docTypes);
+  const applicable = relevantDocTypes(employee, docsByKey, docTypes);
   if (applicable.length === 0) return 100;
   const done = applicable.filter((d) => (docsByKey[d.key]?.status || STATUS.NONE) !== STATUS.NONE).length;
   return Math.round((done / applicable.length) * 100);
