@@ -54,6 +54,13 @@
 //   確認できない場合は失敗とみなし再送信する、とされている)。呼び出し側もこの前提でエラーメッセージを表示すること
 //   実際に本番で確認: 社員番号50002・「資料」メニュー(id=3)・「健康診断書」項目(id=6)・record_code="1"で
 //   テストファイルを送信し、約1分後にjinjer側の画面で実際にファイルが反映されていることを確認できた
+// - 同じrecord_code・同じcustomize_itemに対して2回目のファイルを送信すると、新しい行が増えるのではなく
+//   既存のファイルが新しいファイルで上書きされることを実際に確認した(2026-09-07。社員番号50002の
+//   健康診断書に対して、間隔を空けて2つの異なるテストファイルを送信し、最終的に2つ目のファイルだけが
+//   残ることをjinjer側の画面で確認)。そのため、ensureAddibleCustomItemRecordCode()で常に最初の
+//   レコード(No.1)を使い回す現在の実装は、書類が再提出・再承認されて「jinjerへ送信」が再実行された場合、
+//   jinjer側でも最新のファイルに置き換わる(履歴は残らない)。過去分を別レコードとして残したい場合は
+//   別途ロジック追加が必要
 // - 「項目追加(横)」形式のメニューは、社員にレコード(行)が1件も無い状態だとファイル添付が
 //   「No resources are registered for this employee. Please register the resource first.」(400)で
 //   失敗することを確認した。レコードの存在確認・新規作成は以下のAPIで行う(要:別途読み取り/書き込み権限):
@@ -251,9 +258,34 @@ export async function ensureAddibleCustomItemRecordCode(
   employeeId: string,
   menuId: string
 ): Promise<string> {
-  const existing = await getAddibleCustomItemRecordCode(baseUrl, accessToken, employeeId, menuId);
-  if (existing) return existing;
+  const existing = await listAddibleCustomItemRecordCodes(baseUrl, accessToken, employeeId, menuId);
+  if (existing.length) return existing[0];
+  return createAddibleCustomItemRecord(baseUrl, accessToken, employeeId, menuId, existing);
+}
 
+// 書類が再提出されてjinjerへの再送信が必要になった場合に使う。同じrecord_codeへ再送信すると
+// 既存のファイルが上書きされてしまう(src/jinjer.ts先頭のコメント参照)ため、履歴を残すには
+// ensureAddibleCustomItemRecordCode()のように既存レコードを使い回さず、必ず新しいレコード(行)を
+// 作ってそのrecord_codeを返す。
+export async function createNewAddibleCustomItemRecordCode(
+  baseUrl: string,
+  accessToken: string,
+  employeeId: string,
+  menuId: string
+): Promise<string> {
+  const existing = await listAddibleCustomItemRecordCodes(baseUrl, accessToken, employeeId, menuId);
+  return createAddibleCustomItemRecord(baseUrl, accessToken, employeeId, menuId, existing);
+}
+
+// 新規レコードをPOSTで作成し、作成前の一覧に無かったrecord_codeを新規分として特定して返す
+// (POST自体のレスポンスにはレコードのidが含まれないため。ファイル先頭コメント参照)。
+async function createAddibleCustomItemRecord(
+  baseUrl: string,
+  accessToken: string,
+  employeeId: string,
+  menuId: string,
+  before: string[]
+): Promise<string> {
   const today = new Date().toISOString().slice(0, 10);
   await jinjerFetch(`${baseUrl}/v1/employees/addible-custom-items`, {
     method: 'POST',
@@ -264,23 +296,25 @@ export async function ensureAddibleCustomItemRecordCode(
     })
   });
 
-  const created = await getAddibleCustomItemRecordCode(baseUrl, accessToken, employeeId, menuId);
+  const beforeSet = new Set(before);
+  const after = await listAddibleCustomItemRecordCodes(baseUrl, accessToken, employeeId, menuId);
+  const created = after.find((code) => !beforeSet.has(code));
   if (!created) throw new Error('jinjerに新しいレコードを作成しましたが、record_codeの取得に失敗しました');
   return created;
 }
 
-async function getAddibleCustomItemRecordCode(
+async function listAddibleCustomItemRecordCodes(
   baseUrl: string,
   accessToken: string,
   employeeId: string,
   menuId: string
-): Promise<string | null> {
+): Promise<string[]> {
   type RawRow = { customize_menu: { customize_data?: { id: string }[] } };
   const data = await jinjerFetch<RawRow[]>(
     `${baseUrl}/v1/employees/addible-custom-items?customize-menu-id=${menuId}&employee-ids=${employeeId}`,
     { method: 'GET', headers: authHeaders(accessToken) }
   );
-  return data[0]?.customize_menu?.customize_data?.[0]?.id ?? null;
+  return (data[0]?.customize_menu?.customize_data ?? []).map((r) => r.id);
 }
 
 // (B) ファイル添付(PATCH /v1/async/files)。非同期処理のため、200が返っても「受付」の意味でしかない

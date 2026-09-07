@@ -14,6 +14,7 @@ export type Submission = {
   UpdatedAt: string;
   StorageKey: string;
   MimeType: string;
+  JinjerSentStorageKey: string;
 };
 
 type SubmissionRow = Omit<Submission, 'ReceivedOriginal'> & { ReceivedOriginal: number };
@@ -65,6 +66,7 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
     ReceivedOriginal: false,
     StorageKey: '',
     MimeType: '',
+    JinjerSentStorageKey: '',
     ...(existing ?? {}),
     ...patch,
     UpdatedAt: nowStr()
@@ -72,8 +74,8 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
 
   await db
     .prepare(
-      `INSERT INTO submissions (EmployeeId, DocKey, Status, SubmittedAt, RejectReason, RejectedAt, ReceivedOriginal, UpdatedAt, StorageKey, MimeType)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO submissions (EmployeeId, DocKey, Status, SubmittedAt, RejectReason, RejectedAt, ReceivedOriginal, UpdatedAt, StorageKey, MimeType, JinjerSentStorageKey)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(EmployeeId, DocKey) DO UPDATE SET
          Status=excluded.Status, SubmittedAt=excluded.SubmittedAt, RejectReason=excluded.RejectReason,
          RejectedAt=excluded.RejectedAt, ReceivedOriginal=excluded.ReceivedOriginal, UpdatedAt=excluded.UpdatedAt,
@@ -89,9 +91,20 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
       record.ReceivedOriginal ? 1 : 0,
       record.UpdatedAt,
       record.StorageKey,
-      record.MimeType
+      record.MimeType,
+      record.JinjerSentStorageKey
     )
     .run();
 
   return record;
+}
+
+// jinjerへのファイル送信後、「このStorageKeyまでは送信済み」を記録する(src/jinjer.ts先頭のコメント参照:
+// 同じrecord_codeへの再送は上書きになるため、書類が再提出されてStorageKeyが変わった場合だけ
+// adminSendFilesToJinjer側で新しいレコードを作るかどうかの判定に使う)。
+export async function markJinjerSent(db: D1Database, employeeId: string, docKey: string, storageKey: string): Promise<void> {
+  await db
+    .prepare('UPDATE submissions SET JinjerSentStorageKey = ? WHERE EmployeeId = ? AND DocKey = ?')
+    .bind(storageKey, employeeId, docKey)
+    .run();
 }
