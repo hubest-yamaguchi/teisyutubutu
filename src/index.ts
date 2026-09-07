@@ -162,7 +162,6 @@ const ADMIN_FUNCTIONS: Record<string, (env: Env, email: string, ...args: any[]) 
   adminSyncJinjerMunicipalities: adminApi.adminSyncJinjerMunicipalities,
   adminSyncToJinjer: adminApi.adminSyncToJinjer,
   adminSendFilesToJinjer: adminApi.adminSendFilesToJinjer,
-  adminSendReminder: adminApi.adminSendReminder,
   adminGetMessages: adminApi.adminGetMessages,
   adminSendMessage: adminApi.adminSendMessage,
   adminDeleteMyNumber: adminApi.adminDeleteMyNumber,

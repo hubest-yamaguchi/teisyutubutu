@@ -55,7 +55,7 @@ import {
   ensureAddibleCustomItemRecordCode
 } from '../jinjer';
 import { replaceMunicipalities, findMunicipalityCode, countMunicipalities } from '../db/jinjerMunicipalities';
-import { listMessages, insertOutboundMessage, findMessageById, LineMessageRow } from '../db/lineMessages';
+import { listMessages, insertOutboundMessage, findMessageById, getUnrepliedCounts, getLatestMessages, LineMessageRow } from '../db/lineMessages';
 
 class ApiError extends Error {}
 
@@ -113,6 +113,8 @@ export async function adminGetDashboard(env: Env, email: string, companyFilter?:
   const docTypes = await loadDocTypes(env.DB);
   const employees = await listEmployees(env.DB);
   const allSubs = await getAllSubmissions(env.DB);
+  const unrepliedCounts = await getUnrepliedCounts(env.DB);
+  const latestMessages = await getLatestMessages(env.DB);
 
   const rows = employees
     .filter((e) => !companyFilter || companyFilter === 'すべて' || e.Company === companyFilter)
@@ -132,13 +134,16 @@ export async function adminGetDashboard(env: Env, email: string, companyFilter?:
         stage: computeStage(e, statusMap, docTypes),
         progressPct: progressPct(e, statusMap, docTypes),
         docsSubmitted: submittedCount,
-        docsTotal: applicable.length
+        docsTotal: applicable.length,
+        unrepliedCount: unrepliedCounts[String(e.EmployeeId)] || 0,
+        lastMessage: latestMessages[String(e.EmployeeId)] || null
       };
     });
 
   const kpi: Record<string, number> = {
     total: rows.length,
-    avgProgress: rows.length ? Math.round(rows.reduce((s, r) => s + r.progressPct, 0) / rows.length) : 0
+    avgProgress: rows.length ? Math.round(rows.reduce((s, r) => s + r.progressPct, 0) / rows.length) : 0,
+    unread: rows.reduce((s, r) => s + r.unrepliedCount, 0)
   };
   for (const stage of ['未提出', '確認中', '差し戻し', '原本待ち', '受入準備完了']) {
     kpi[stage] = rows.filter((r) => r.stage === stage).length;
@@ -227,15 +232,6 @@ export async function adminToggleOriginalReceived(env: Env, email: string, emplo
   });
   await appendHistory(env.DB, employeeId, 'guarantor', received ? '原本受領' : '原本受領取消', '', email);
   return adminGetEmployeeDetail(env, email, employeeId);
-}
-
-export async function adminSendReminder(env: Env, email: string, employeeId: string, message: string) {
-  await requireAdmin(env, email);
-  const employee = await findEmployeeById(env.DB, employeeId);
-  if (!employee) throw new ApiError('新入社員情報が見つかりません');
-  const result = await notifyEmployee(env.DB, employee, message);
-  await appendHistory(env.DB, employeeId, '', 'リマインダー送信', message, email);
-  return result;
 }
 
 export async function adminDeleteMyNumber(env: Env, email: string, employeeId: string) {
