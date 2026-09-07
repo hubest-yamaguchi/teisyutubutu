@@ -15,7 +15,9 @@ type DocConfigRow = {
   Description: string;
   SortOrder: number;
   CompaniesJson: string;
-  JinjerCustomItemCode: string;
+  JinjerCustomMenuId: string;
+  JinjerCustomItemId: string;
+  JinjerRecordCode: string;
 };
 
 export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
@@ -38,7 +40,9 @@ export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
       sensitive: !!r.Sensitive,
       description: r.Description || '',
       companies,
-      jinjerCustomItemCode: r.JinjerCustomItemCode || ''
+      jinjerCustomMenuId: r.JinjerCustomMenuId || '',
+      jinjerCustomItemId: r.JinjerCustomItemId || '',
+      jinjerRecordCode: r.JinjerRecordCode || ''
     };
     if (String(r.ConditionType || '').trim() === '通勤手段' && r.ConditionValue) {
       d.condition = { type: 'commute', value: String(r.ConditionValue).trim() } as DocCondition;
@@ -54,8 +58,8 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
 
   const stmt = db.prepare(
     `INSERT INTO company_document_config
-      (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, JinjerCustomItemCode)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   await db.batch(
     DOC_TYPES.map((d, i) =>
@@ -70,7 +74,9 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
         d.description ?? '',
         i,
         JSON.stringify(d.companies ?? []),
-        d.jinjerCustomItemCode ?? ''
+        d.jinjerCustomMenuId ?? '',
+        d.jinjerCustomItemId ?? '',
+        d.jinjerRecordCode ?? ''
       )
     )
   );
@@ -80,13 +86,14 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
   await db
     .prepare(
       `INSERT INTO company_document_config
-        (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, JinjerCustomItemCode)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(DocKey) DO UPDATE SET
          Label=excluded.Label, RequiresOriginal=excluded.RequiresOriginal, PdfAllowed=excluded.PdfAllowed,
          ConditionType=excluded.ConditionType, ConditionValue=excluded.ConditionValue, Sensitive=excluded.Sensitive,
          Description=excluded.Description, SortOrder=excluded.SortOrder, CompaniesJson=excluded.CompaniesJson,
-         JinjerCustomItemCode=excluded.JinjerCustomItemCode`
+         JinjerCustomMenuId=excluded.JinjerCustomMenuId, JinjerCustomItemId=excluded.JinjerCustomItemId,
+         JinjerRecordCode=excluded.JinjerRecordCode`
     )
     .bind(
       doc.key,
@@ -99,7 +106,9 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
       doc.description ?? '',
       sortOrder,
       JSON.stringify(doc.companies ?? []),
-      doc.jinjerCustomItemCode ?? ''
+      doc.jinjerCustomMenuId ?? '',
+      doc.jinjerCustomItemId ?? '',
+      doc.jinjerRecordCode ?? ''
     )
     .run();
 }

@@ -508,7 +508,7 @@
         '<hr><h3>jinjer連携</h3>' +
         '<p class="muted">緊急連絡先をjinjerに登録します（続柄・都道府県/市区町村は分かる範囲でコードを引き当てます）。' +
         (e.jinjerEmployeeId ? 'jinjer社員番号: ' + e.jinjerEmployeeId : '<b style="color:#C4881B;">jinjer社員番号が未設定です（「設定」＞「新入社員登録」で入力してください）</b>') +
-        '。jinjer側は登録専用（更新不可）のため、送信は1回のみ行えます。承認済み書類のファイル送信は、書類マスタでjinjerカスタム項目コードを設定した書類のみが対象です。</p>' +
+        '。jinjer側は登録専用（更新不可）のため、送信は1回のみ行えます。承認済み書類のファイル送信は、書類マスタでjinjerカスタムメニューID・カスタム項目IDを設定した書類のみが対象です（送信は非同期処理のため、反映まで数分かかる場合があります）。</p>' +
         (e.jinjerSyncedAt ? '<p><span class="status-pill" style="background:#E9F5EA;color:#3F9142;">緊急連絡先 送信済み ' + e.jinjerSyncedAt + '</span></p>' : '') +
         '<button class="btn ghost" id="jinjerSyncBtn" onclick="syncToJinjer()"' + (e.jinjerSyncedAt ? ' disabled' : '') + '>緊急連絡先をjinjerに登録</button> ' +
         '<button class="btn ghost" id="jinjerFilesBtn" onclick="sendFilesToJinjer()">承認済み書類をjinjerに送る</button>' +
@@ -677,7 +677,7 @@
       var btn = document.getElementById('jinjerFilesBtn');
       if (btn) { btn.disabled = true; btn.textContent = '送信中…'; }
       callServer_('adminSendFilesToJinjer', [CURRENT_DETAIL_ID]).then(function () {
-        showToast('承認済み書類をjinjerに送信しました');
+        showToast('jinjerへの送信をリクエストしました（反映まで数分かかる場合があります。jinjer側でご確認ください）');
         loadDashboard();
       }).catch(function (err) {
         if (btn) { btn.disabled = false; btn.textContent = '承認済み書類をjinjerに送る'; }
@@ -1155,8 +1155,8 @@
         '<button class="btn ghost" onclick="syncJinjerMunicipalities()">市区町村マスタを同期</button>' +
         '<div id="jinjerMunicipalityResult" style="margin-top:8px;"></div></div>' +
         '<div class="card"><h2>書類のjinjer送信対象</h2>' +
-        '<p class="muted">承認済み書類をjinjerにファイル添付するには、「書類マスタ」で書類ごとにjinjerカスタム項目コードを設定してください（未設定の書類は送信対象外になります）。' +
-        'カスタム項目自体はjinjer側の管理画面で先に作成しておく必要があります。</p></div>'
+        '<p class="muted">承認済み書類をjinjerにファイル添付するには、「書類マスタ」で書類ごとにjinjerカスタムメニューID・カスタム項目IDを設定してください（両方未設定の書類は送信対象外になります）。' +
+        'カスタム項目自体はjinjer側の管理画面で先に作成しておく必要があります。このファイル添付APIは非同期処理のため、送信後すぐに反映されるとは限りません（jinjer側の画面で数分後に確認してください）。</p></div>'
       );
 
       // 書類マスタ(旧: スプレッドシート直接編集)。ドラッグで並び替え可能
@@ -1191,8 +1191,12 @@
               '<input type="text" id="doc-' + i + '-condval" value="' + escAttr(condVal) + '" placeholder="条件の値(車/自転車など)" style="width:200px;">' +
               '</div>' +
               '<textarea id="doc-' + i + '-desc" rows="2" style="margin-top:6px;" placeholder="説明文">' + (d.description || '') + '</textarea>' +
-              '<label class="muted" style="display:block;margin-top:6px;">jinjerカスタム項目コード（未設定ならjinjer送信対象外）</label>' +
-              '<input type="text" id="doc-' + i + '-jinjer" value="' + escAttr(d.jinjerCustomItemCode || '') + '" placeholder="jinjer側で作成したカスタム項目のコード">' +
+              '<label class="muted" style="display:block;margin-top:6px;">jinjerカスタムメニューID・カスタム項目ID（両方未設定ならjinjer送信対象外）</label>' +
+              '<div class="row-flex">' +
+              '<input type="text" id="doc-' + i + '-jinjermenu" value="' + escAttr(d.jinjerCustomMenuId || '') + '" placeholder="カスタムメニューID" style="width:160px;">' +
+              '<input type="text" id="doc-' + i + '-jinjeritem" value="' + escAttr(d.jinjerCustomItemId || '') + '" placeholder="カスタム項目ID" style="width:160px;">' +
+              '<input type="text" id="doc-' + i + '-jinjerrecord" value="' + escAttr(d.jinjerRecordCode || '') + '" placeholder="項目追加(横)なら auto（自動作成）、または番号を直接指定" style="width:260px;">' +
+              '</div>' +
               '<div style="height:6px;"></div>' +
               '<button class="btn ghost" onclick="saveDocConfig(' + i + ')">保存</button> ' +
               '<button class="btn danger" onclick="removeDocConfig(\'' + escAttr(d.key) + '\')">削除</button>' +
@@ -1480,7 +1484,9 @@
         description: document.getElementById('doc-' + i + '-desc').value,
         condition: condType && condVal ? { type: condType, value: condVal } : undefined,
         companies: companies,
-        jinjerCustomItemCode: document.getElementById('doc-' + i + '-jinjer').value.trim()
+        jinjerCustomMenuId: document.getElementById('doc-' + i + '-jinjermenu').value.trim(),
+        jinjerCustomItemId: document.getElementById('doc-' + i + '-jinjeritem').value.trim(),
+        jinjerRecordCode: document.getElementById('doc-' + i + '-jinjerrecord').value.trim()
       };
       callServer_('settingsSaveDocConfig', [doc, i]).then(renderSettingsAndToast_).catch(showError);
     }

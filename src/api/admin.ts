@@ -46,7 +46,14 @@ import { todayStr, nowStr } from '../util/date';
 import { SettingsCategory, SETTINGS_CATEGORIES, sanitizePermissions } from '../permissions';
 import { getEmployeeFile } from '../r2';
 import { getDriveAccessToken, ensureFolder, uploadFileToDrive, syncFolderPermissions } from '../drive';
-import { getAccessToken, attachFile, syncEmergencyContact, resolveRelationshipId, listMunicipalities } from '../jinjer';
+import {
+  getAccessToken,
+  attachFile,
+  syncEmergencyContact,
+  resolveRelationshipId,
+  listMunicipalities,
+  ensureAddibleCustomItemRecordCode
+} from '../jinjer';
 import { replaceMunicipalities, findMunicipalityCode, countMunicipalities } from '../db/jinjerMunicipalities';
 import { listMessages, insertOutboundMessage, findMessageById, LineMessageRow } from '../db/lineMessages';
 
@@ -503,29 +510,55 @@ export async function adminSendFilesToJinjer(env: Env, email: string, employeeId
   const docTypes = await loadDocTypes(env.DB);
   const subs = await getSubmissionsMap(env.DB, employeeId);
   const targets = applicableDocTypes(employee, docTypes).filter(
-    (d) => d.jinjerCustomItemCode && subs[d.key]?.Status === STATUS.APPROVED && subs[d.key]?.StorageKey
+    (d) => d.jinjerCustomMenuId && d.jinjerCustomItemId && subs[d.key]?.Status === STATUS.APPROVED && subs[d.key]?.StorageKey
   );
   if (!targets.length) {
-    throw new ApiError('jinjerに送信できる承認済み書類がありません（書類マスタでjinjerカスタム項目コードを設定した書類のみが対象です）');
+    throw new ApiError('jinjerに送信できる承認済み書類がありません（書類マスタでjinjerカスタムメニューID・カスタム項目IDを設定した書類のみが対象です）');
   }
 
+  // 「jinjerRecordCode」欄の意味: 空欄=record_code不要(項目羅列形式) / "auto"=既存レコードを使うか無ければ
+  // 自動作成する(項目追加(横)形式で、どのレコードでもよい場合) / それ以外の値=そのまま手動指定として使う。
+  // 同じメニューを共有する書類が複数あっても、自動解決は1メニューにつき1回だけ行い使い回す(重複作成防止)。
+  const autoRecordCodeByMenu = new Map<string, string>();
   let sentCount = 0;
   for (const d of targets) {
     const sub = subs[d.key];
     const obj = await getEmployeeFile(env.DOCS, sub.StorageKey);
     if (!obj) continue;
+    const extMatch = sub.StorageKey.match(/\.([^./]+)$/);
+    const ext = extMatch ? `.${extMatch[1]}` : '';
+
+    let recordCode = d.jinjerRecordCode || undefined;
+    if (recordCode === 'auto') {
+      const menuId = d.jinjerCustomMenuId!;
+      if (!autoRecordCodeByMenu.has(menuId)) {
+        autoRecordCodeByMenu.set(menuId, await ensureAddibleCustomItemRecordCode(baseUrl, accessToken, employee.JinjerEmployeeId, menuId));
+      }
+      recordCode = autoRecordCodeByMenu.get(menuId);
+    }
+
     await attachFile(baseUrl, accessToken, {
       employeeId: employee.JinjerEmployeeId,
-      customItemCode: d.jinjerCustomItemCode!,
-      fileName: `${employee.Name}_${d.label}`,
-      mimeType: sub.MimeType || 'application/octet-stream',
+      customMenuId: d.jinjerCustomMenuId!,
+      customItemId: d.jinjerCustomItemId!,
+      recordCode,
+      fileName: `${employee.Name}_${d.label}${ext}`,
       bytes: await obj.arrayBuffer()
     });
     sentCount++;
   }
   if (!sentCount) throw new ApiError('送信対象のファイル実体が見つかりませんでした');
 
-  await appendHistory(env.DB, employeeId, '', 'jinjerファイル送信', `承認済み書類${sentCount}件をjinjerに送信`, email);
+  // このAPIは非同期処理のため、200が返っても実際に登録できたとは限らない(src/jinjer.ts先頭のコメント参照)。
+  // 反映確認はjinjer側の画面で行ってもらう想定。
+  await appendHistory(
+    env.DB,
+    employeeId,
+    '',
+    'jinjerファイル送信',
+    `承認済み書類${sentCount}件をjinjerに送信リクエスト（反映まで数分かかる場合があります。jinjer側で確認してください）`,
+    email
+  );
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 

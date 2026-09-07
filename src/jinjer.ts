@@ -1,8 +1,8 @@
 // ジンジャー(jinjer)人事労務APIとの連携。
 //
 // 【重要】このファイルには、まだ確定していない仕様が含まれる。開発者ガイド(https://doc.api.jinjer.biz/index.html)
-// で確認できたのは以下のみで、それ以外(従業員マスタ登録/更新のエンドポイントとフィールド名、
-// ファイル添付のfileオブジェクトの実際の中身)は未確認。「要確認」と書いた箇所は、確認でき次第調整すること。
+// で確認できたのは以下のみで、それ以外(従業員マスタ登録/更新のエンドポイントとフィールド名)は未確認。
+// 「要確認」と書いた箇所は、確認でき次第調整すること。
 //
 // 確認済み(本番環境に対して実際にAPIを叩いて動作確認済み。2026-09-05):
 // - ベースURLは`https://api.jinjer.biz`固定(パス構成: https://api.jinjer.biz/{バージョン}/{リソース})
@@ -37,6 +37,34 @@
 //     (一致しない場合は未指定のまま登録する。フリー入力の住所と完全一致しない可能性があるため)
 //   ※どちらのマスタ参照エンドポイントも、書き込み用とは別に読み取り権限をAPIキーに追加しないと
 //     403(Request to this endpoint or method is not allowed)になることを確認した
+// - ファイル添付は `PATCH /v1/async/files`(POSTではなくPATCH。パスも/v1/employees/filesではない)。ボディ:
+//     { employee_id, type: { id: "8" }, customize_menu: { id, customize_item: { id } }, record_code?,
+//       file: { name, encoded_string(base64) } }
+//   ※customize_itemはcustomize_menuの中にネストする(トップレベルに置くと400エラー"customize_item is not
+//     allowed"になることを実際のエラーで確認した)
+//   type.idは文字列("8"=カスタム項目・詳細項目・ファイル形式。他に5:資格証明書/6:研修添付/7:労働契約書等がある)。
+//   カスタム項目の場合、customize_menu.id(カスタムメニューのID)とcustomize_item.id(メニュー内の項目のID)の
+//   **両方**が必要(1つのコードではなく2段階のID)。この2つのIDは`GET /v1/master/custom-menus`(要:別途読み取り
+//   権限)で調べられる(各メニューのdata[].idと、その中のcustomize_item[].id)。record_codeは対象のカスタム項目が
+//   「項目追加(横)」形式の場合のみ必須(「項目羅列」形式なら逆に指定不可)。jinjer側の社員ごとの一覧画面で
+//   「No」として表示されている番号がrecord_codeに相当する。
+//   file.encoded_stringはBase64。**file.nameの拡張子はPNG/JPG/JPEG/PDFのみ**(それ以外は400エラー)。
+//   **重要**: このエンドポイントは非同期。200が返っても「受付」の意味でしかなく、実際に登録できたかは
+//   登録先の各情報のエンドポイント側で別途確認する必要がある(ジンジャー側の説明では、15分経っても反映が
+//   確認できない場合は失敗とみなし再送信する、とされている)。呼び出し側もこの前提でエラーメッセージを表示すること
+//   実際に本番で確認: 社員番号50002・「資料」メニュー(id=3)・「健康診断書」項目(id=6)・record_code="1"で
+//   テストファイルを送信し、約1分後にjinjer側の画面で実際にファイルが反映されていることを確認できた
+// - 「項目追加(横)」形式のメニューは、社員にレコード(行)が1件も無い状態だとファイル添付が
+//   「No resources are registered for this employee. Please register the resource first.」(400)で
+//   失敗することを確認した。レコードの存在確認・新規作成は以下のAPIで行う(要:別途読み取り/書き込み権限):
+//   - GET /v1/employees/addible-custom-items?customize-menu-id=&employee-ids= … 既存レコード一覧の取得。
+//     `data[0].customize_menu.customize_data[0].id`がrecord_code相当(実際に確認済み)
+//   - POST /v1/employees/addible-custom-items … 新規レコードの作成。ボディ:
+//     { employee_id, customize_menu: { id, customize_item: [{ id, value }, ...] } }
+//     (customize_itemは配列。作成時は最低1項目の値が必要で、ファイル形式の項目には値を設定できないため、
+//     日付項目(id="1"という前提。実際に確認できた唯一の例に基づく暫定ルール)に本日の日付を入れて作成する)
+//     レスポンスは`{employee_id, customize_menu:{id}}`のみで、作成されたレコード自体のidは返らないため、
+//     作成後に上記GETで改めて取得する必要がある(ensureAddibleCustomItemRecordCode()で実装)
 //
 // [drive.ts]と同じ方針で、Workers環境向けにfetchで直接REST APIを叩く(SDKは使わない)。
 
@@ -85,10 +113,10 @@ export type JinjerMunicipalityRow = {
 
 export type JinjerFileAttachment = {
   employeeId: string; // 社員番号
-  customItemCode: string; // jinjer側で事前に作成した「カスタム項目(詳細項目・ファイル形式)」のコード
-  recordCode?: string; // カスタム項目が「項目追加(横)」形式の場合のみ必須(要確認)
+  customMenuId: string; // jinjer側で事前に作成した「カスタムメニュー」のID
+  customItemId: string; // 上記メニュー内の「カスタム項目」のID
+  recordCode?: string; // カスタム項目が「項目追加(横)」形式の場合のみ必須。「項目羅列」形式なら指定しない
   fileName: string;
-  mimeType: string;
   bytes: ArrayBuffer;
 };
 
@@ -211,24 +239,67 @@ export async function listMunicipalities(baseUrl: string, accessToken: string): 
   return rows;
 }
 
-// (B) ファイル添付。employee_id/type/customize_menu/record_code はユーザーが確認した仕様に沿っているが、
-// customize_menuの中身のキー名・fileオブジェクトの形式(base64かmultipartか)は要確認。
+// 「項目追加(横)」形式のメニュー(例: 資料)は、社員にレコード(行)が1件も無いとファイル添付が
+// 「No resources are registered for this employee. Please register the resource first.」で失敗することを
+// 実際に確認した。既存レコードのrecord_codeを取得し、無ければ「日付」項目(id=1という前提。実際に確認できた
+// 唯一の例に基づく暫定ルールで、他のメニューで異なる場合は要調整)に本日の日付を入れて新規作成する。
+// 同じメニューを共有する複数の書類は、この関数を1回だけ呼んで結果を使い回すこと(呼び出しごとに
+// 新しい行を作ってしまわないため)。
+export async function ensureAddibleCustomItemRecordCode(
+  baseUrl: string,
+  accessToken: string,
+  employeeId: string,
+  menuId: string
+): Promise<string> {
+  const existing = await getAddibleCustomItemRecordCode(baseUrl, accessToken, employeeId, menuId);
+  if (existing) return existing;
+
+  const today = new Date().toISOString().slice(0, 10);
+  await jinjerFetch(`${baseUrl}/v1/employees/addible-custom-items`, {
+    method: 'POST',
+    headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      employee_id: employeeId,
+      customize_menu: { id: menuId, customize_item: [{ id: '1', value: today }] }
+    })
+  });
+
+  const created = await getAddibleCustomItemRecordCode(baseUrl, accessToken, employeeId, menuId);
+  if (!created) throw new Error('jinjerに新しいレコードを作成しましたが、record_codeの取得に失敗しました');
+  return created;
+}
+
+async function getAddibleCustomItemRecordCode(
+  baseUrl: string,
+  accessToken: string,
+  employeeId: string,
+  menuId: string
+): Promise<string | null> {
+  type RawRow = { customize_menu: { customize_data?: { id: string }[] } };
+  const data = await jinjerFetch<RawRow[]>(
+    `${baseUrl}/v1/employees/addible-custom-items?customize-menu-id=${menuId}&employee-ids=${employeeId}`,
+    { method: 'GET', headers: authHeaders(accessToken) }
+  );
+  return data[0]?.customize_menu?.customize_data?.[0]?.id ?? null;
+}
+
+// (B) ファイル添付(PATCH /v1/async/files)。非同期処理のため、200が返っても「受付」の意味でしかない
+// (ファイル先頭のコメント参照)。呼び出し側にもその旨を伝えること。
 export async function attachFile(baseUrl: string, accessToken: string, params: JinjerFileAttachment): Promise<void> {
   const body: Record<string, unknown> = {
     employee_id: params.employeeId,
-    type: 8, // カスタム項目(詳細項目・ファイル形式)。本システムの書類は標準カテゴリ(5/6/7)と対応しないため常に8を使う
-    customize_menu: { code: params.customItemCode } // 要確認: 実際のキー名
+    type: { id: '8' }, // カスタム項目(詳細項目・ファイル形式)。本システムの書類は標準カテゴリ(5/6/7)と対応しないため常に8を使う
+    // customize_itemはcustomize_menuの中にネストする(トップレベルに置くと400エラーになることを確認済み)
+    customize_menu: { id: params.customMenuId, customize_item: { id: params.customItemId } },
+    file: {
+      name: params.fileName,
+      encoded_string: arrayBufferToBase64(params.bytes)
+    }
   };
   if (params.recordCode) body.record_code = params.recordCode;
-  body.file = {
-    // 要確認: filename/mime_type等のキー名、base64かmultipartか
-    filename: params.fileName,
-    mime_type: params.mimeType,
-    content_base64: arrayBufferToBase64(params.bytes)
-  };
 
-  await jinjerFetch(`${baseUrl}/v1/employees/files`, {
-    method: 'POST',
+  await jinjerFetch(`${baseUrl}/v1/async/files`, {
+    method: 'PATCH',
     headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   });

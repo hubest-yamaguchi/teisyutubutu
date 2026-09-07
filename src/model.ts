@@ -15,7 +15,10 @@ export type DocType = {
   condition?: DocCondition;
   companies?: string[]; // 空/未指定なら全社共通。指定した法人の内定者にのみ提出を求める
   description?: string;
-  jinjerCustomItemCode?: string; // jinjer側に用意した「カスタム項目(ファイル形式)」のコード。空ならjinjer送信対象外
+  // jinjer側に用意した「カスタム項目(ファイル形式)」のID。customMenuId/customItemIdの両方が空でない場合のみjinjer送信対象
+  jinjerCustomMenuId?: string;
+  jinjerCustomItemId?: string;
+  jinjerRecordCode?: string; // カスタム項目が「項目追加(横)」形式の場合のみ必須。「項目羅列」形式なら空のまま
 };
 
 export const DOC_TYPES: DocType[] = [
