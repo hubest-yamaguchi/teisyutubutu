@@ -416,7 +416,7 @@
       var data = window.__lastDashboard;
       if (!data) return;
       var kpiKeys = ['total', '未提出', '確認中', '差し戻し', '原本待ち', '受入準備完了'];
-      var kpiLabels = { total: '全新入社員', '未提出': '未提出', '確認中': '確認中', '差し戻し': '差し戻し中', '原本待ち': '⚠️ 原本提出待ち', '受入準備完了': '受入準備完了' };
+      var kpiLabels = { total: '全新入社員', '未提出': '未提出', '確認中': '確認中', '差し戻し': '差し戻し中', '原本待ち': '原本提出待ち', '受入準備完了': '受入準備完了' };
       var kpiHtml = kpiKeys.map(function (k) {
         var filterVal = k === 'total' ? null : k;
         var isActive = DASH_STAGE_FILTER === filterVal;
@@ -528,7 +528,7 @@
     function statusPillHtml_(d) {
       if (d.status === '原本提出待ち') {
         return '<span class="pill st-承認済">承認済</span> ' +
-          '<span style="color:#C1443A;font-weight:700;font-size:.78rem;margin-left:4px;">⚠️ 原本未提出</span>';
+          '<span style="color:#C1443A;font-weight:700;font-size:.78rem;margin-left:4px;">原本提出待ち</span>';
       }
       return '<span class="pill st-' + d.status + '">' + d.status + '</span>';
     }
