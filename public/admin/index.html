@@ -1331,7 +1331,11 @@
               '</select>' +
               '<input type="text" id="doc-' + i + '-condval" value="' + escAttr(condVal) + '" placeholder="条件の値(通勤手段: 車/自転車など、免許証: あり)" style="width:260px;">' +
               '</div>' +
-              '<textarea id="doc-' + i + '-desc" rows="2" style="margin-top:6px;" placeholder="説明文">' + (d.description || '') + '</textarea>' +
+              '<textarea id="doc-' + i + '-desc" rows="6" style="margin-top:6px;" placeholder="説明文">' + escHtml_(d.description || '') + '</textarea>' +
+              '<div class="muted" style="margin-top:8px;">見本画像（任意。1行に1件、「画像URL」または「画像URL|説明文」の形式）</div>' +
+              '<textarea id="doc-' + i + '-samples" rows="2" style="margin-top:2px;" placeholder="/liff/samples/xxx.png|説明文">' +
+              escHtml_((d.sampleImages || []).map(function (si) { return si.url + (si.caption ? '|' + si.caption : ''); }).join('\n')) +
+              '</textarea>' +
               '<label class="muted" style="display:block;margin-top:6px;">jinjerカスタムメニューID・カスタム項目ID（両方未設定ならjinjer送信対象外）</label>' +
               '<div class="row-flex">' +
               '<input type="text" id="doc-' + i + '-jinjermenu" value="' + escAttr(d.jinjerCustomMenuId || '') + '" placeholder="カスタムメニューID" style="width:160px;">' +
@@ -1617,6 +1621,10 @@
       var condVal = document.getElementById('doc-' + i + '-condval').value.trim();
       var companies = Array.prototype.slice.call(document.querySelectorAll('.doc-' + i + '-company:checked')).map(function (el) { return el.value; });
       var hireTypes = Array.prototype.slice.call(document.querySelectorAll('.doc-' + i + '-hiretype:checked')).map(function (el) { return el.value; });
+      var sampleImages = document.getElementById('doc-' + i + '-samples').value.split('\n').map(function (line) { return line.trim(); }).filter(function (line) { return line; }).map(function (line) {
+        var idx = line.indexOf('|');
+        return idx === -1 ? { url: line } : { url: line.slice(0, idx).trim(), caption: line.slice(idx + 1).trim() };
+      });
       var doc = {
         key: d.key,
         label: label,
@@ -1631,6 +1639,7 @@
         condition: condType && condVal ? { type: condType, value: condVal } : undefined,
         companies: companies,
         hireTypes: hireTypes,
+        sampleImages: sampleImages,
         jinjerCustomMenuId: document.getElementById('doc-' + i + '-jinjermenu').value.trim(),
         jinjerCustomItemId: document.getElementById('doc-' + i + '-jinjeritem').value.trim(),
         jinjerRecordCode: document.getElementById('doc-' + i + '-jinjerrecord').value.trim()

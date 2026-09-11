@@ -2,7 +2,7 @@
 // company_document_config テーブルを実際の判定に使う書類マスタとして読み込む。
 // テーブルが未セットアップ・空の場合は model.ts の DOC_TYPES をそのまま使う(フォールバック)。
 
-import { DOC_TYPES, DocType, DocCondition } from '../model';
+import { DOC_TYPES, DocType, DocCondition, DocSampleImage } from '../model';
 
 // ConditionType列にはDB内で日本語ラベルとして保存する(既存データが'通勤手段'のため後方互換)。
 // DocType.condition.typeは内部的な英語キー('commute'/'hasLicense')なので、ここで相互変換する。
@@ -30,6 +30,7 @@ type DocConfigRow = {
   SortOrder: number;
   CompaniesJson: string;
   HireTypesJson: string;
+  SampleImagesJson: string;
   JinjerCustomMenuId: string;
   JinjerCustomItemId: string;
   JinjerRecordCode: string;
@@ -54,6 +55,12 @@ export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
     } catch {
       hireTypes = [];
     }
+    let sampleImages: DocSampleImage[] = [];
+    try {
+      sampleImages = JSON.parse(r.SampleImagesJson || '[]');
+    } catch {
+      sampleImages = [];
+    }
     const d: DocType = {
       key: String(r.DocKey).trim(),
       label: r.Label,
@@ -66,6 +73,7 @@ export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
       description: r.Description || '',
       companies,
       hireTypes,
+      sampleImages,
       optional: !!r.Optional,
       jinjerCustomMenuId: r.JinjerCustomMenuId || '',
       jinjerCustomItemId: r.JinjerCustomItemId || '',
@@ -86,8 +94,8 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
 
   const stmt = db.prepare(
     `INSERT INTO company_document_config
-      (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, SampleImagesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   await db.batch(
     DOC_TYPES.map((d, i) =>
@@ -106,6 +114,7 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
         i,
         JSON.stringify(d.companies ?? []),
         JSON.stringify(d.hireTypes ?? []),
+        JSON.stringify(d.sampleImages ?? []),
         d.jinjerCustomMenuId ?? '',
         d.jinjerCustomItemId ?? '',
         d.jinjerRecordCode ?? '',
@@ -119,14 +128,14 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
   await db
     .prepare(
       `INSERT INTO company_document_config
-        (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, SampleImagesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(DocKey) DO UPDATE SET
          Label=excluded.Label, RequiresOriginal=excluded.RequiresOriginal, PdfAllowed=excluded.PdfAllowed,
          WordAllowed=excluded.WordAllowed, TextAllowed=excluded.TextAllowed, PhotoAllowed=excluded.PhotoAllowed,
          ConditionType=excluded.ConditionType, ConditionValue=excluded.ConditionValue, Sensitive=excluded.Sensitive,
          Description=excluded.Description, SortOrder=excluded.SortOrder, CompaniesJson=excluded.CompaniesJson,
-         HireTypesJson=excluded.HireTypesJson,
+         HireTypesJson=excluded.HireTypesJson, SampleImagesJson=excluded.SampleImagesJson,
          JinjerCustomMenuId=excluded.JinjerCustomMenuId, JinjerCustomItemId=excluded.JinjerCustomItemId,
          JinjerRecordCode=excluded.JinjerRecordCode, Optional=excluded.Optional`
     )
@@ -145,6 +154,7 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
       sortOrder,
       JSON.stringify(doc.companies ?? []),
       JSON.stringify(doc.hireTypes ?? []),
+      JSON.stringify(doc.sampleImages ?? []),
       doc.jinjerCustomMenuId ?? '',
       doc.jinjerCustomItemId ?? '',
       doc.jinjerRecordCode ?? '',

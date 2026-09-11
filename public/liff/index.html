@@ -659,6 +659,10 @@
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
+    function escAttr_(v) {
+      return escHtml_(v).replace(/"/g, '&quot;');
+    }
+
     var WORD_MIME_TYPES_ = ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
 
     function isWordFile_(file) {
@@ -685,9 +689,16 @@
           '<div style="height:10px"></div><button onclick="submitText()">テキストで提出する</button>' +
           '</div>'
         : '';
+      var samplesHtml = (doc.sampleImages || []).map(function (si) {
+        return '<div style="margin:10px 0;">' +
+          '<img src="' + escAttr_(si.url) + '" style="max-width:100%;border-radius:8px;border:1px solid #DBE1DF;display:block;">' +
+          (si.caption ? '<p class="muted" style="text-align:center;margin-top:4px;font-size:.8rem;">' + escHtml_(si.caption) + '</p>' : '') +
+          '</div>';
+      }).join('');
       document.getElementById('uploadArea').innerHTML =
         '<div class="card"><h2>' + doc.label + 'の提出</h2>' +
         (doc.description ? '<p class="muted" style="white-space:pre-wrap;">' + escHtml_(doc.description) + '</p>' : '') +
+        samplesHtml +
         fileSection +
         textSection +
         '<div id="uploadStatus" class="muted" style="margin-top:8px;"></div></div>';

@@ -71,6 +71,7 @@ async function buildDocumentsPayload(db: D1Database, employee: Employee) {
       key: d.key,
       label: d.label,
       description: d.description || '',
+      sampleImages: d.sampleImages || [],
       requiresOriginal: !!d.requiresOriginal,
       pdfAllowed: !!d.pdfAllowed,
       wordAllowed: !!d.wordAllowed,
