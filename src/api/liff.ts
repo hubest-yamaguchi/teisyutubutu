@@ -77,6 +77,9 @@ async function buildDocumentsPayload(db: D1Database, employee: Employee) {
       wordAllowed: !!d.wordAllowed,
       textAllowed: !!d.textAllowed,
       photoAllowed: d.photoAllowed !== false,
+      dualFile: !!d.dualFile,
+      hasFile: !!s.StorageKey,
+      hasFile2: !!s.StorageKey2,
       sensitive: !!d.sensitive,
       optional: !!d.optional,
       status: applicableFlag ? s.Status || STATUS.NONE : STATUS.NA,
@@ -238,14 +241,16 @@ export async function getMyDocuments(env: Env, eid: string) {
   return buildDocumentsPayload(env.DB, employee);
 }
 
-// 書類のアップロード(新規提出・再提出とも同じ経路。ファイルは上書き)。完了後の最新一覧も返す
+// 書類のアップロード(新規提出・再提出とも同じ経路。ファイルは上書き)。完了後の最新一覧も返す。
+// slot: dualFileの書類(マイナンバー表裏など)でのみ使用。2を指定すると2枚目(裏面)として保存する
 export async function submitDocument(
   env: Env,
   eid: string,
   docKey: string,
   base64Data: string,
   mimeType: string,
-  fileExt: string
+  fileExt: string,
+  slot?: number
 ) {
   const employee = await findEmployeeById(env.DB, eid);
   if (!employee) throw new ApiError('新入社員情報が見つかりません');
@@ -259,19 +264,20 @@ export async function submitDocument(
     throw new ApiError('この書類は写真での提出に対応していません。Word・PDFファイルを添付するか、テキストで提出してください。');
   }
 
+  const isBackSide = !!meta.dualFile && slot === 2;
+  const fileLabel = meta.dualFile ? `${meta.label}(${isBackSide ? '裏面' : '表面'})` : meta.label;
   const seq = docTypes.findIndex((d) => d.key === docKey) + 1;
-  const storageKey = await saveEmployeeFile(env.DOCS, employee.EmployeeId, meta.label, seq, base64Data, mimeType, fileExt);
+  const storageKey = await saveEmployeeFile(env.DOCS, employee.EmployeeId, fileLabel, seq, base64Data, mimeType, fileExt);
 
   await upsertSubmission(env.DB, eid, docKey, {
     Status: STATUS.REVIEW,
     SubmittedAt: todayStr(),
     RejectReason: '',
     RejectedAt: '',
-    StorageKey: storageKey,
-    MimeType: mimeType,
-    TextContent: ''
+    TextContent: '',
+    ...(isBackSide ? { StorageKey2: storageKey, MimeType2: mimeType } : { StorageKey: storageKey, MimeType: mimeType })
   });
-  await appendHistory(env.DB, eid, docKey, '提出', `${meta.label}を提出`, '');
+  await appendHistory(env.DB, eid, docKey, '提出', `${meta.label}を提出${meta.dualFile ? `(${isBackSide ? '裏面' : '表面'})` : ''}`, '');
 
   const payload = await buildDocumentsPayload(env.DB, employee);
   payload.ok = true;

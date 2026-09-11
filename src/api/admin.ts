@@ -170,10 +170,12 @@ export async function adminGetEmployeeDetail(env: Env, email: string, employeeId
     const requiredOverride: number | null = s.RequiredOverride ?? null;
     const applicableFlag = isApplicable(d, employee, requiredOverride);
     const isMyNumber = d.key === 'myNumber';
+    const restrictedView = isMyNumber && !canViewMyNumberFlag;
     return {
       key: d.key,
       label: d.label,
       requiresOriginal: !!d.requiresOriginal,
+      dualFile: !!d.dualFile,
       sensitive: !!d.sensitive,
       status: applicableFlag ? s.Status || STATUS.NONE : STATUS.NA,
       submittedAt: s.SubmittedAt || '',
@@ -182,8 +184,9 @@ export async function adminGetEmployeeDetail(env: Env, email: string, employeeId
       receivedOriginal: !!s.ReceivedOriginal,
       textContent: s.TextContent || '',
       requiredOverride,
-      restrictedView: isMyNumber && !canViewMyNumberFlag,
-      hasFile: !!s.StorageKey && !(isMyNumber && !canViewMyNumberFlag)
+      restrictedView,
+      hasFile: !!s.StorageKey && !restrictedView,
+      hasFile2: !!s.StorageKey2 && !restrictedView
     };
   });
 
@@ -205,6 +208,19 @@ export async function adminApproveDoc(env: Env, email: string, employeeId: strin
   const newStatus = meta.requiresOriginal ? STATUS.ORIGINAL_WAIT : STATUS.APPROVED;
   await upsertSubmission(env.DB, employeeId, docKey, { Status: newStatus, RejectReason: '' });
   await appendHistory(env.DB, employeeId, docKey, '承認', `${meta.label}を確認・承認`, email);
+  return adminGetEmployeeDetail(env, email, employeeId);
+}
+
+// 承認済みの取り消し(誤って承認した場合の取り消し用)。「確認中」に戻す。
+// 原本必要な書類が「承認済」の場合は原本受領によるものなので、こちらではなくtoggleOriginalReceived(false)で
+// 「原本提出待ち」に戻す(adminApproveDoc/toggleOriginalReceivedのどちらで承認済になったかに揃えて元に戻すため)。
+export async function adminUnapproveDoc(env: Env, email: string, employeeId: string, docKey: string) {
+  await requireAdmin(env, email);
+  const docTypes = await loadDocTypes(env.DB);
+  const meta = docTypes.find((d) => d.key === docKey);
+  if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
+  await upsertSubmission(env.DB, employeeId, docKey, { Status: STATUS.REVIEW });
+  await appendHistory(env.DB, employeeId, docKey, '承認取消', `${meta.label}の承認を取り消し`, email);
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 
@@ -276,7 +292,7 @@ function extFromStorageKey(key: string): string {
 }
 
 // 管理画面から提出ファイルを表示・ダウンロードするための認可付きファイル情報取得(実体の取得はindex.ts側でR2から行う)
-export async function adminGetFileInfo(env: Env, email: string, employeeId: string, docKey: string) {
+export async function adminGetFileInfo(env: Env, email: string, employeeId: string, docKey: string, slot?: number) {
   await requireAdmin(env, email);
   const employee = await findEmployeeById(env.DB, employeeId);
   if (!employee) throw new ApiError('新入社員情報が見つかりません');
@@ -288,11 +304,15 @@ export async function adminGetFileInfo(env: Env, email: string, employeeId: stri
   if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
   const subs = await getSubmissionsMap(env.DB, employeeId);
   const sub = subs[docKey];
-  if (!sub || !sub.StorageKey) throw new ApiError('ファイルが見つかりません');
+  const isBackSide = !!meta.dualFile && slot === 2;
+  const storageKey = isBackSide ? sub?.StorageKey2 : sub?.StorageKey;
+  const mimeType = isBackSide ? sub?.MimeType2 : sub?.MimeType;
+  if (!sub || !storageKey) throw new ApiError('ファイルが見つかりません');
+  const labelSuffix = meta.dualFile ? (isBackSide ? '_裏面' : '_表面') : '';
   return {
-    key: sub.StorageKey,
-    mimeType: sub.MimeType || 'application/octet-stream',
-    fileName: `${employee.Name}_${meta.label}${extFromStorageKey(sub.StorageKey)}`
+    key: storageKey,
+    mimeType: mimeType || 'application/octet-stream',
+    fileName: `${employee.Name}_${meta.label}${labelSuffix}${extFromStorageKey(storageKey)}`
   };
 }
 
@@ -307,15 +327,23 @@ export async function adminGetZipManifest(env: Env, email: string, employeeId: s
   const canViewMyNumberFlag = await canViewMyNumber(env.DB, email, employee.Company);
   const subs = await getSubmissionsMap(env.DB, employeeId);
 
-  const files = docTypes
+  const files: { key: string; fileName: string }[] = [];
+  docTypes
     .filter((d) => isApplicable(d, employee, subs[d.key]?.RequiredOverride))
     .filter((d) => d.key !== 'myNumber' || canViewMyNumberFlag)
-    .map((d) => ({ d, sub: subs[d.key] }))
-    .filter(({ sub }) => sub && sub.StorageKey)
-    .map(({ d, sub }) => ({
-      key: sub.StorageKey,
-      fileName: `${d.label}${extFromStorageKey(sub.StorageKey)}`
-    }));
+    .forEach((d) => {
+      const sub = subs[d.key];
+      if (!sub) return;
+      if (sub.StorageKey) {
+        files.push({
+          key: sub.StorageKey,
+          fileName: `${d.label}${d.dualFile ? '_表面' : ''}${extFromStorageKey(sub.StorageKey)}`
+        });
+      }
+      if (d.dualFile && sub.StorageKey2) {
+        files.push({ key: sub.StorageKey2, fileName: `${d.label}_裏面${extFromStorageKey(sub.StorageKey2)}` });
+      }
+    });
 
   if (!files.length) throw new ApiError('ダウンロードできる書類がありません');
   return { zipName: `${employee.Name}_提出書類.zip`, files };

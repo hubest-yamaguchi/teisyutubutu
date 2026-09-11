@@ -14,6 +14,9 @@ export type Submission = {
   UpdatedAt: string;
   StorageKey: string;
   MimeType: string;
+  // dualFileの書類(マイナンバー表裏など)専用の2枚目のファイル。dualFileでない書類では常に空文字
+  StorageKey2: string;
+  MimeType2: string;
   TextContent: string; // ファイル添付の代わりに、テキストで直接提出された内容(textAllowedの書類のみ使用)
   JinjerSentStorageKey: string;
   // 個別社員に対する提出要否の上書き。null=通常通り書類マスタの条件で判定。1=この人だけ対象にする。0=この人だけ対象外にする
@@ -50,7 +53,8 @@ export async function getAllSubmissions(db: D1Database): Promise<Record<string, 
 export type SubmissionPatch = Partial<
   Pick<
     Submission,
-    'Status' | 'SubmittedAt' | 'RejectReason' | 'RejectedAt' | 'ReceivedOriginal' | 'StorageKey' | 'MimeType' | 'TextContent' | 'RequiredOverride'
+    | 'Status' | 'SubmittedAt' | 'RejectReason' | 'RejectedAt' | 'ReceivedOriginal'
+    | 'StorageKey' | 'MimeType' | 'StorageKey2' | 'MimeType2' | 'TextContent' | 'RequiredOverride'
   >
 >;
 
@@ -72,6 +76,8 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
     ReceivedOriginal: false,
     StorageKey: '',
     MimeType: '',
+    StorageKey2: '',
+    MimeType2: '',
     TextContent: '',
     JinjerSentStorageKey: '',
     RequiredOverride: null,
@@ -82,13 +88,13 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
 
   await db
     .prepare(
-      `INSERT INTO submissions (EmployeeId, DocKey, Status, SubmittedAt, RejectReason, RejectedAt, ReceivedOriginal, UpdatedAt, StorageKey, MimeType, TextContent, JinjerSentStorageKey, RequiredOverride)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO submissions (EmployeeId, DocKey, Status, SubmittedAt, RejectReason, RejectedAt, ReceivedOriginal, UpdatedAt, StorageKey, MimeType, StorageKey2, MimeType2, TextContent, JinjerSentStorageKey, RequiredOverride)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(EmployeeId, DocKey) DO UPDATE SET
          Status=excluded.Status, SubmittedAt=excluded.SubmittedAt, RejectReason=excluded.RejectReason,
          RejectedAt=excluded.RejectedAt, ReceivedOriginal=excluded.ReceivedOriginal, UpdatedAt=excluded.UpdatedAt,
-         StorageKey=excluded.StorageKey, MimeType=excluded.MimeType, TextContent=excluded.TextContent,
-         RequiredOverride=excluded.RequiredOverride`
+         StorageKey=excluded.StorageKey, MimeType=excluded.MimeType, StorageKey2=excluded.StorageKey2, MimeType2=excluded.MimeType2,
+         TextContent=excluded.TextContent, RequiredOverride=excluded.RequiredOverride`
     )
     .bind(
       record.EmployeeId,
@@ -101,6 +107,8 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
       record.UpdatedAt,
       record.StorageKey,
       record.MimeType,
+      record.StorageKey2,
+      record.MimeType2,
       record.TextContent,
       record.JinjerSentStorageKey,
       record.RequiredOverride === null || record.RequiredOverride === undefined ? null : record.RequiredOverride

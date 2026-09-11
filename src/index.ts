@@ -156,6 +156,7 @@ const ADMIN_FUNCTIONS: Record<string, (env: Env, email: string, ...args: any[]) 
   adminGetDashboard: adminApi.adminGetDashboard,
   adminGetEmployeeDetail: adminApi.adminGetEmployeeDetail,
   adminApproveDoc: adminApi.adminApproveDoc,
+  adminUnapproveDoc: adminApi.adminUnapproveDoc,
   adminRejectDocsBatch: adminApi.adminRejectDocsBatch,
   adminToggleOriginalReceived: adminApi.adminToggleOriginalReceived,
   adminSetDocRequiredOverride: adminApi.adminSetDocRequiredOverride,
@@ -205,8 +206,9 @@ app.get('/api/admin/file', async (c) => {
   const employeeId = c.req.query('employeeId') || '';
   const docKey = c.req.query('docKey') || '';
   const download = c.req.query('download') === '1';
+  const slot = c.req.query('slot') ? Number(c.req.query('slot')) : undefined;
   try {
-    const info = await adminApi.adminGetFileInfo(c.env, email, employeeId, docKey);
+    const info = await adminApi.adminGetFileInfo(c.env, email, employeeId, docKey, slot);
     const obj = await getEmployeeFile(c.env.DOCS, info.key);
     if (!obj) return c.json({ ok: false, error: 'ファイルが見つかりません' }, 404);
     return new Response(obj.body, {

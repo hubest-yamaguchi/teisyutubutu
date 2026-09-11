@@ -124,7 +124,7 @@
     var DEMO_DOCS = [
       { key: 'guarantor', label: '身元保証書', description: '内定者本人と保証人が記入する書類です。必ずボールペンで記入してください。', requiresOriginal: true, pdfAllowed: false, status: '原本提出待ち', submittedAt: '2026-08-20', rejectReason: '', rejectedAt: '' },
       { key: 'bank', label: '給与振込先届', description: '通帳のコピーなど、口座名義・口座番号・支店名がわかるものを提出してください。', requiresOriginal: false, pdfAllowed: false, status: '承認済', submittedAt: '2026-08-18', rejectReason: '', rejectedAt: '' },
-      { key: 'myNumber', label: 'マイナンバー確認書類', description: 'マイナンバーカード(両面)、または通知カード＋本人確認書類の写しを提出してください。', requiresOriginal: false, pdfAllowed: false, status: '確認中', submittedAt: '2026-08-25', rejectReason: '', rejectedAt: '' },
+      { key: 'myNumber', label: 'マイナンバー確認書類', description: 'マイナンバーカード(表面・裏面)、または通知カード＋本人確認書類の写しを提出してください。', requiresOriginal: false, pdfAllowed: false, dualFile: true, hasFile: true, hasFile2: false, status: '確認中', submittedAt: '2026-08-25', rejectReason: '', rejectedAt: '' },
       { key: 'residence', label: '住民票', description: '「住民票謄本」(世帯全員が記載されたもの)を提出してください。', requiresOriginal: false, pdfAllowed: false, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
       { key: 'health', label: '健康診断書', description: '直近1年以内に受診したものを提出してください。', requiresOriginal: false, pdfAllowed: true, status: '差し戻し', submittedAt: '2026-08-15', rejectReason: '画像が不鮮明です。文字がはっきり読める写真を再度アップロードしてください。', rejectedAt: '2026-08-16' },
       { key: 'withholding', label: '源泉徴収票(前職分)', description: '前職やアルバイト先がある方が対象です。', requiresOriginal: false, pdfAllowed: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
@@ -186,7 +186,10 @@
         if (fn === 'getMyDocuments' || fn === 'liffBind' || fn === 'getMyStatusByLine') return demoPayload();
         if (fn === 'submitDocument') {
           var doc = DEMO_DOCS.filter(function (d) { return d.key === args[1]; })[0];
-          if (doc) { doc.status = '確認中'; doc.submittedAt = '(デモ)'; doc.rejectReason = ''; doc.textContent = ''; }
+          if (doc) {
+            doc.status = '確認中'; doc.submittedAt = '(デモ)'; doc.rejectReason = ''; doc.textContent = '';
+            if (doc.dualFile && args[5] === 2) doc.hasFile2 = true; else doc.hasFile = true;
+          }
           return demoPayload();
         }
         if (fn === 'submitDocumentText') {
@@ -671,11 +674,32 @@
       if (doc.photoAllowed !== false) { acceptParts.push('image/*'); hints.push('写真'); }
       if (doc.pdfAllowed) { acceptParts.push('application/pdf'); hints.push('PDF'); }
       if (doc.wordAllowed) { acceptParts.push('.doc', '.docx', WORD_MIME_TYPES_[0], WORD_MIME_TYPES_[1]); hints.push('Wordファイル'); }
-      var fileSection = acceptParts.length
-        ? '<p class="muted">' + hints.join('・') + 'を選択してください</p>' +
-          '<input type="file" id="fileInput" accept="' + acceptParts.join(',') + '">' +
-          '<div style="height:10px"></div><button onclick="doUpload()">アップロードする</button>'
-        : '';
+      var acceptAttr = acceptParts.join(',');
+      var hintText = hints.join('・') + 'を選択してください';
+
+      var fileSection;
+      if (doc.dualFile) {
+        fileSection = acceptParts.length
+          ? '<div style="margin-bottom:18px;">' +
+            '<p style="font-weight:700;margin-bottom:2px;">表面' + (doc.hasFile ? '<span class="muted">（提出済み。再提出する場合は選び直してください）</span>' : '') + '</p>' +
+            '<p class="muted">' + hintText + '</p>' +
+            '<input type="file" id="fileInput1" accept="' + acceptAttr + '">' +
+            '<div style="height:10px"></div><button onclick="doUpload(1)">表面をアップロードする</button>' +
+            '</div>' +
+            '<div>' +
+            '<p style="font-weight:700;margin-bottom:2px;">裏面' + (doc.hasFile2 ? '<span class="muted">（提出済み。再提出する場合は選び直してください）</span>' : '') + '</p>' +
+            '<p class="muted">' + hintText + '</p>' +
+            '<input type="file" id="fileInput2" accept="' + acceptAttr + '">' +
+            '<div style="height:10px"></div><button onclick="doUpload(2)">裏面をアップロードする</button>' +
+            '</div>'
+          : '';
+      } else {
+        fileSection = acceptParts.length
+          ? '<p class="muted">' + hintText + '</p>' +
+            '<input type="file" id="fileInput" accept="' + acceptAttr + '">' +
+            '<div style="height:10px"></div><button onclick="doUpload()">アップロードする</button>'
+          : '';
+      }
       var textSection = doc.textAllowed
         ? '<div style="' + (fileSection ? 'margin-top:16px;padding-top:16px;border-top:1px solid #EEF0F1;' : '') + '">' +
           '<p class="muted">' + (fileSection ? '── またはテキストを直接入力して提出 ──' : 'テキストを直接入力して提出してください') + '</p>' +
@@ -729,8 +753,8 @@
       });
     }
 
-    function doUpload() {
-      var input = document.getElementById('fileInput');
+    function doUpload(slot) {
+      var input = document.getElementById(slot ? 'fileInput' + slot : 'fileInput');
       var file = input.files[0];
       if (!file) return;
       var doc = STATE.docs.filter(function (d) { return d.key === STATE.currentDocKey; })[0];
@@ -742,7 +766,7 @@
       document.getElementById('uploadStatus').textContent = '画像を圧縮中…';
       compressImage_(file).then(function (result) {
         document.getElementById('uploadStatus').textContent = 'アップロード中…';
-        callServer_('submitDocument', [STATE.employee.id, STATE.currentDocKey, result.base64, result.mimeType, result.ext])
+        callServer_('submitDocument', [STATE.employee.id, STATE.currentDocKey, result.base64, result.mimeType, result.ext, slot])
           .then(applyPayload).catch(showError);
       }).catch(function (err) { hideOverlay(); showError(err); });
     }

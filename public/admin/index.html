@@ -573,12 +573,27 @@
 
         var actions = '';
         var canReject = d.status === '確認中' || d.status === '原本提出待ち';
-        if (d.hasFile) {
+        if (d.dualFile) {
+          if (d.hasFile) {
+            actions += '<button class="btn ghost" onclick="viewFile(\'' + d.key + '\', 1)">表面を表示</button> ';
+            actions += '<button class="btn ghost" onclick="downloadFile(\'' + d.key + '\', 1)">表面をDL</button> ';
+          }
+          if (d.hasFile2) {
+            actions += '<button class="btn ghost" onclick="viewFile(\'' + d.key + '\', 2)">裏面を表示</button> ';
+            actions += '<button class="btn ghost" onclick="downloadFile(\'' + d.key + '\', 2)">裏面をDL</button> ';
+          }
+          if (d.hasFile !== d.hasFile2) {
+            actions += '<span class="muted" style="font-size:.76rem;">' + (!d.hasFile ? '表面が未提出' : '裏面が未提出') + '</span> ';
+          }
+        } else if (d.hasFile) {
           actions += '<button class="btn ghost" onclick="viewFile(\'' + d.key + '\')">書類を表示</button> ';
           actions += '<button class="btn ghost" onclick="downloadFile(\'' + d.key + '\')">ダウンロード</button> ';
         }
         if (d.status === '確認中') {
           actions += '<button class="btn approve" onclick="approveDoc(\'' + d.key + '\')">承認</button> ';
+        }
+        if (d.status === '承認済' && !d.requiresOriginal) {
+          actions += '<button class="btn ghost" onclick="unapproveDoc(\'' + d.key + '\')">承認を取り消す</button> ';
         }
         if (d.requiresOriginal && d.status === '原本提出待ち') {
           actions += '<button class="btn approve" onclick="toggleOriginalReceived(\'' + d.key + '\', true)">原本を受領した</button> ';
@@ -731,8 +746,8 @@
       return headers;
     }
 
-    function viewFile(docKey) {
-      var url = '/api/admin/file?employeeId=' + encodeURIComponent(CURRENT_DETAIL_ID) + '&docKey=' + encodeURIComponent(docKey);
+    function viewFile(docKey, slot) {
+      var url = '/api/admin/file?employeeId=' + encodeURIComponent(CURRENT_DETAIL_ID) + '&docKey=' + encodeURIComponent(docKey) + (slot ? '&slot=' + slot : '');
       fetch(url, { headers: adminAuthHeaders_() }).then(function (res) {
         if (!res.ok) return res.json().then(function (e) { throw new Error(e.error || 'ファイルの取得に失敗しました'); });
         return res.blob();
@@ -760,8 +775,8 @@
       setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
     }
 
-    function downloadFile(docKey) {
-      var url = '/api/admin/file?employeeId=' + encodeURIComponent(CURRENT_DETAIL_ID) + '&docKey=' + encodeURIComponent(docKey) + '&download=1';
+    function downloadFile(docKey, slot) {
+      var url = '/api/admin/file?employeeId=' + encodeURIComponent(CURRENT_DETAIL_ID) + '&docKey=' + encodeURIComponent(docKey) + '&download=1' + (slot ? '&slot=' + slot : '');
       fetch(url, { headers: adminAuthHeaders_() }).then(function (res) {
         if (!res.ok) return res.json().then(function (e) { throw new Error(e.error || 'ファイルの取得に失敗しました'); });
         var fileName = filenameFromContentDisposition_(res.headers.get('Content-Disposition'), 'document');
@@ -780,6 +795,11 @@
 
     function approveDoc(docKey) {
       callServer_('adminApproveDoc', [CURRENT_DETAIL_ID, docKey]).then(function () { loadDashboard(); }).catch(showError);
+    }
+
+    function unapproveDoc(docKey) {
+      if (!confirm('承認を取り消して「確認中」に戻します。よろしいですか？')) return;
+      callServer_('adminUnapproveDoc', [CURRENT_DETAIL_ID, docKey]).then(function () { loadDashboard(); }).catch(showError);
     }
 
     function toggleOriginalReceived(docKey, received) {

@@ -23,6 +23,7 @@ type DocConfigRow = {
   WordAllowed: number;
   TextAllowed: number;
   PhotoAllowed: number;
+  DualFile: number;
   ConditionType: string;
   ConditionValue: string;
   Sensitive: number;
@@ -69,6 +70,7 @@ export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
       wordAllowed: !!r.WordAllowed,
       textAllowed: !!r.TextAllowed,
       photoAllowed: r.PhotoAllowed !== 0,
+      dualFile: !!r.DualFile,
       sensitive: !!r.Sensitive,
       description: r.Description || '',
       companies,
@@ -94,8 +96,8 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
 
   const stmt = db.prepare(
     `INSERT INTO company_document_config
-      (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, SampleImagesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, DualFile, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, SampleImagesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   await db.batch(
     DOC_TYPES.map((d, i) =>
@@ -107,6 +109,7 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
         d.wordAllowed ? 1 : 0,
         d.textAllowed ? 1 : 0,
         d.photoAllowed === false ? 0 : 1,
+        d.dualFile ? 1 : 0,
         d.condition ? CONDITION_TYPE_LABELS[d.condition.type] : '',
         d.condition ? d.condition.value : '',
         d.sensitive ? 1 : 0,
@@ -128,11 +131,12 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
   await db
     .prepare(
       `INSERT INTO company_document_config
-        (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, SampleImagesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, DualFile, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, SampleImagesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(DocKey) DO UPDATE SET
          Label=excluded.Label, RequiresOriginal=excluded.RequiresOriginal, PdfAllowed=excluded.PdfAllowed,
          WordAllowed=excluded.WordAllowed, TextAllowed=excluded.TextAllowed, PhotoAllowed=excluded.PhotoAllowed,
+         DualFile=excluded.DualFile,
          ConditionType=excluded.ConditionType, ConditionValue=excluded.ConditionValue, Sensitive=excluded.Sensitive,
          Description=excluded.Description, SortOrder=excluded.SortOrder, CompaniesJson=excluded.CompaniesJson,
          HireTypesJson=excluded.HireTypesJson, SampleImagesJson=excluded.SampleImagesJson,
@@ -147,6 +151,7 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
       doc.wordAllowed ? 1 : 0,
       doc.textAllowed ? 1 : 0,
       doc.photoAllowed === false ? 0 : 1,
+      doc.dualFile ? 1 : 0,
       doc.condition ? CONDITION_TYPE_LABELS[doc.condition.type] : '',
       doc.condition ? doc.condition.value : '',
       doc.sensitive ? 1 : 0,

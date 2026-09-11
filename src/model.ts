@@ -18,6 +18,9 @@ export type DocType = {
   wordAllowed?: boolean; // Word(.doc/.docx)ファイルの添付も受け付ける
   textAllowed?: boolean; // ファイル添付の代わりに、テキストを直接入力しての提出も受け付ける
   photoAllowed?: boolean; // 写真での提出を受け付けるか(未指定/true=可。falseにすると写真提出を禁止)
+  // マイナンバーカードの表裏のように、1つの書類項目で2枚の画像を提出できるようにする(承認・差し戻し等の
+  // ステータスは1件のまま共通。ファイルの実体だけ2つ持てる。証明書1〜3のような複数書類には使わない)
+  dualFile?: boolean;
   sensitive?: boolean;
   condition?: DocCondition;
   companies?: string[]; // 空/未指定なら全社共通。指定した法人の内定者にのみ提出を求める
@@ -65,9 +68,10 @@ export const DOC_TYPES: DocType[] = [
     jinjerCustomMenuId: '3', jinjerCustomItemId: '17', jinjerRecordCode: 'auto'
   },
   {
-    key: 'myNumber', label: 'マイナンバー確認書類', sensitive: true,
+    key: 'myNumber', label: 'マイナンバー確認書類', sensitive: true, dualFile: true,
     description:
-      '🪪 マイナンバーカード（両面）、またはマイナンバー通知カード＋本人確認書類の写しを提出してください。\n\n' +
+      '🪪 マイナンバーカード（表面・裏面）、またはマイナンバー通知カード＋本人確認書類の写しを提出してください。\n' +
+      '下の「表面」「裏面」それぞれに写真を1枚ずつアップロードしてください。\n\n' +
       'お持ちでない方・紛失された方・有効期限が切れている方は、発行までお時間がかかりますので、お早めに申請してください。'
   },
   {
