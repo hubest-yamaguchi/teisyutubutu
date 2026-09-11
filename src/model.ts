@@ -34,6 +34,7 @@ export type DocType = {
   jinjerCustomMenuId?: string;
   jinjerCustomItemId?: string;
   jinjerRecordCode?: string; // カスタム項目が「項目追加(横)」形式の場合のみ必須。「項目羅列」形式なら空のまま
+  jinjerCustomItemId2?: string; // dualFileの2枚目(裏面)用。jinjerCustomMenuId・jinjerRecordCodeは1枚目と共通
 };
 
 export const DOC_TYPES: DocType[] = [
@@ -133,14 +134,11 @@ export const DOC_TYPES: DocType[] = [
     jinjerCustomMenuId: '3', jinjerCustomItemId: '2', jinjerRecordCode: 'auto'
   },
   {
-    key: 'licenseFront', label: '運転免許証（表面）', condition: { type: 'hasLicense', value: 'あり' },
-    description: '🪪 運転免許証の表面（氏名・生年月日・免許証番号が記載されている面）の写しを提出してください。',
-    jinjerCustomMenuId: '3', jinjerCustomItemId: '18', jinjerRecordCode: 'auto'
-  },
-  {
-    key: 'licenseBack', label: '運転免許証（裏面）', condition: { type: 'hasLicense', value: 'あり' },
-    description: '🪪 運転免許証の裏面（本籍・条件等が記載されている面）の写しを提出してください。',
-    jinjerCustomMenuId: '3', jinjerCustomItemId: '19', jinjerRecordCode: 'auto'
+    key: 'licenseFront', label: '運転免許証', dualFile: true, condition: { type: 'hasLicense', value: 'あり' },
+    description:
+      '🪪 運転免許証の写しを提出してください。\n' +
+      '「表面」（氏名・生年月日・免許証番号が記載されている面）と「裏面」（本籍・条件等が記載されている面）の両方をアップロードしてください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '18', jinjerCustomItemId2: '19', jinjerRecordCode: 'auto'
   },
   {
     key: 'graduationCertificate', label: '卒業証明書', pdfAllowed: true, hireTypes: ['新卒'],

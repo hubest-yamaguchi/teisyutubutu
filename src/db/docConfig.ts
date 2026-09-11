@@ -34,6 +34,7 @@ type DocConfigRow = {
   SampleImagesJson: string;
   JinjerCustomMenuId: string;
   JinjerCustomItemId: string;
+  JinjerCustomItemId2: string;
   JinjerRecordCode: string;
   Optional: number;
 };
@@ -79,6 +80,7 @@ export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
       optional: !!r.Optional,
       jinjerCustomMenuId: r.JinjerCustomMenuId || '',
       jinjerCustomItemId: r.JinjerCustomItemId || '',
+      jinjerCustomItemId2: r.JinjerCustomItemId2 || '',
       jinjerRecordCode: r.JinjerRecordCode || ''
     };
     const condType = CONDITION_TYPE_BY_LABEL[String(r.ConditionType || '').trim()];
@@ -96,8 +98,8 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
 
   const stmt = db.prepare(
     `INSERT INTO company_document_config
-      (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, DualFile, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, SampleImagesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, DualFile, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, SampleImagesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerCustomItemId2, JinjerRecordCode, Optional)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   await db.batch(
     DOC_TYPES.map((d, i) =>
@@ -120,6 +122,7 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
         JSON.stringify(d.sampleImages ?? []),
         d.jinjerCustomMenuId ?? '',
         d.jinjerCustomItemId ?? '',
+        d.jinjerCustomItemId2 ?? '',
         d.jinjerRecordCode ?? '',
         d.optional ? 1 : 0
       )
@@ -131,8 +134,8 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
   await db
     .prepare(
       `INSERT INTO company_document_config
-        (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, DualFile, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, SampleImagesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (DocKey, Label, RequiresOriginal, PdfAllowed, WordAllowed, TextAllowed, PhotoAllowed, DualFile, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, SampleImagesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerCustomItemId2, JinjerRecordCode, Optional)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(DocKey) DO UPDATE SET
          Label=excluded.Label, RequiresOriginal=excluded.RequiresOriginal, PdfAllowed=excluded.PdfAllowed,
          WordAllowed=excluded.WordAllowed, TextAllowed=excluded.TextAllowed, PhotoAllowed=excluded.PhotoAllowed,
@@ -141,6 +144,7 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
          Description=excluded.Description, SortOrder=excluded.SortOrder, CompaniesJson=excluded.CompaniesJson,
          HireTypesJson=excluded.HireTypesJson, SampleImagesJson=excluded.SampleImagesJson,
          JinjerCustomMenuId=excluded.JinjerCustomMenuId, JinjerCustomItemId=excluded.JinjerCustomItemId,
+         JinjerCustomItemId2=excluded.JinjerCustomItemId2,
          JinjerRecordCode=excluded.JinjerRecordCode, Optional=excluded.Optional`
     )
     .bind(
@@ -162,6 +166,7 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
       JSON.stringify(doc.sampleImages ?? []),
       doc.jinjerCustomMenuId ?? '',
       doc.jinjerCustomItemId ?? '',
+      doc.jinjerCustomItemId2 ?? '',
       doc.jinjerRecordCode ?? '',
       doc.optional ? 1 : 0
     )

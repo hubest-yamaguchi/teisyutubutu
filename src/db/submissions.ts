@@ -19,6 +19,7 @@ export type Submission = {
   MimeType2: string;
   TextContent: string; // ファイル添付の代わりに、テキストで直接提出された内容(textAllowedの書類のみ使用)
   JinjerSentStorageKey: string;
+  JinjerSentStorageKey2: string; // dualFileの2枚目(裏面)用。markJinjerSentと同じ意味
   // 個別社員に対する提出要否の上書き。null=通常通り書類マスタの条件で判定。1=この人だけ対象にする。0=この人だけ対象外にする
   RequiredOverride: number | null;
 };
@@ -80,6 +81,7 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
     MimeType2: '',
     TextContent: '',
     JinjerSentStorageKey: '',
+    JinjerSentStorageKey2: '',
     RequiredOverride: null,
     ...(existing ?? {}),
     ...patch,
@@ -88,8 +90,8 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
 
   await db
     .prepare(
-      `INSERT INTO submissions (EmployeeId, DocKey, Status, SubmittedAt, RejectReason, RejectedAt, ReceivedOriginal, UpdatedAt, StorageKey, MimeType, StorageKey2, MimeType2, TextContent, JinjerSentStorageKey, RequiredOverride)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO submissions (EmployeeId, DocKey, Status, SubmittedAt, RejectReason, RejectedAt, ReceivedOriginal, UpdatedAt, StorageKey, MimeType, StorageKey2, MimeType2, TextContent, JinjerSentStorageKey, JinjerSentStorageKey2, RequiredOverride)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(EmployeeId, DocKey) DO UPDATE SET
          Status=excluded.Status, SubmittedAt=excluded.SubmittedAt, RejectReason=excluded.RejectReason,
          RejectedAt=excluded.RejectedAt, ReceivedOriginal=excluded.ReceivedOriginal, UpdatedAt=excluded.UpdatedAt,
@@ -111,6 +113,7 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
       record.MimeType2,
       record.TextContent,
       record.JinjerSentStorageKey,
+      record.JinjerSentStorageKey2,
       record.RequiredOverride === null || record.RequiredOverride === undefined ? null : record.RequiredOverride
     )
     .run();
@@ -121,9 +124,10 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
 // jinjerへのファイル送信後、「このStorageKeyまでは送信済み」を記録する(src/jinjer.ts先頭のコメント参照:
 // 同じrecord_codeへの再送は上書きになるため、書類が再提出されてStorageKeyが変わった場合だけ
 // adminSendFilesToJinjer側で新しいレコードを作るかどうかの判定に使う)。
-export async function markJinjerSent(db: D1Database, employeeId: string, docKey: string, storageKey: string): Promise<void> {
+export async function markJinjerSent(db: D1Database, employeeId: string, docKey: string, storageKey: string, slot?: number): Promise<void> {
+  const column = slot === 2 ? 'JinjerSentStorageKey2' : 'JinjerSentStorageKey';
   await db
-    .prepare('UPDATE submissions SET JinjerSentStorageKey = ? WHERE EmployeeId = ? AND DocKey = ?')
+    .prepare(`UPDATE submissions SET ${column} = ? WHERE EmployeeId = ? AND DocKey = ?`)
     .bind(storageKey, employeeId, docKey)
     .run();
 }

@@ -131,8 +131,7 @@
       { key: 'graduationCertificate', label: '卒業証明書', description: '卒業した学校が発行する「卒業証明書」を提出してください（高校卒業の方は「卒業証書」のコピーでも可）。', requiresOriginal: false, pdfAllowed: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
       { key: 'carRegistration', label: '車検証の写し', description: '車で通勤される方が対象です。', requiresOriginal: false, pdfAllowed: false, status: '承認済', submittedAt: '2026-08-19', rejectReason: '', rejectedAt: '' },
       { key: 'carInsurance', label: '自動車保険証券の写し', description: '車で通勤される方が対象です。', requiresOriginal: false, pdfAllowed: false, status: '承認済', submittedAt: '2026-08-19', rejectReason: '', rejectedAt: '' },
-      { key: 'licenseFront', label: '運転免許証（表面）', description: '運転免許証をお持ちの方が対象です。', requiresOriginal: false, pdfAllowed: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' },
-      { key: 'licenseBack', label: '運転免許証（裏面）', description: '運転免許証をお持ちの方が対象です。', requiresOriginal: false, pdfAllowed: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'licenseFront', label: '運転免許証', description: '運転免許証をお持ちの方が対象です。表面・裏面の両方をアップロードしてください。', requiresOriginal: false, pdfAllowed: false, dualFile: true, hasFile: false, hasFile2: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' },
       { key: 'certificate1', label: '資格証明書（1）', description: 'お持ちの資格・免許があれば提出してください(任意)。', requiresOriginal: false, pdfAllowed: false, optional: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
       { key: 'certificate2', label: '資格証明書（2）', description: '2件目がある場合のみ(任意)。', requiresOriginal: false, pdfAllowed: false, optional: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
       { key: 'certificate3', label: '資格証明書（3）', description: '3件目がある場合のみ(任意)。', requiresOriginal: false, pdfAllowed: false, optional: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
@@ -173,9 +172,8 @@
           DEMO_EMPLOYEE.commute = args[2];
           DEMO_EMPLOYEE.hasLicense = args[3];
           DEMO_EMPLOYEE.hireType = args[4];
-          var frontBack = ['licenseFront', 'licenseBack'];
           DEMO_DOCS.forEach(function (d) {
-            if (frontBack.indexOf(d.key) !== -1) d.status = args[3] === 'あり' ? '未提出' : '対象外';
+            if (d.key === 'licenseFront') d.status = args[3] === 'あり' ? '未提出' : '対象外';
           });
           return demoPayload();
         }

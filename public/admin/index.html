@@ -1122,6 +1122,7 @@
       if (d.photoAllowed === false) html += '<span class="badge warn">写真不可</span>';
       if (d.sensitive) html += '<span class="badge warn">機微情報</span>';
       if (d.optional) html += '<span class="badge optional">任意</span>';
+      if (d.dualFile) html += '<span class="badge on">表裏2枚</span>';
       if (d.condition) html += '<span class="badge">条件:' + (d.condition.type === 'commute' ? '通勤' : '免許') + '=' + escAttr(d.condition.value) + '</span>';
       if ((d.companies || []).length) html += '<span class="badge">対象法人 ' + d.companies.length + '件</span>';
       if ((d.hireTypes || []).length) html += '<span class="badge">対象区分 ' + escAttr(d.hireTypes.join('/')) + '</span>';
@@ -1403,6 +1404,7 @@
               '<label class="check"><input type="checkbox" ' + (d.textAllowed ? 'checked' : '') + ' id="doc-' + i + '-text"> テキスト直接入力可</label>' +
               '<label class="check"><input type="checkbox" ' + (d.sensitive ? 'checked' : '') + ' id="doc-' + i + '-sens"> 機微情報</label>' +
               '<label class="check"><input type="checkbox" ' + (d.optional ? 'checked' : '') + ' id="doc-' + i + '-optional"> 任意（未提出でも進捗を止めない）</label>' +
+              '<label class="check"><input type="checkbox" ' + (d.dualFile ? 'checked' : '') + ' id="doc-' + i + '-dualfile"> 表裏2枚アップロード可</label>' +
               '</div>' +
               '<div class="muted" style="margin-top:8px;">対象法人（未チェックなら全法人共通）</div>' +
               '<div class="row-flex" style="margin-top:2px;">' +
@@ -1433,7 +1435,8 @@
               '<label class="muted" style="display:block;margin-top:6px;">jinjerカスタムメニューID・カスタム項目ID（両方未設定ならjinjer送信対象外）</label>' +
               '<div class="row-flex">' +
               '<input type="text" id="doc-' + i + '-jinjermenu" value="' + escAttr(d.jinjerCustomMenuId || '') + '" placeholder="カスタムメニューID" style="width:160px;">' +
-              '<input type="text" id="doc-' + i + '-jinjeritem" value="' + escAttr(d.jinjerCustomItemId || '') + '" placeholder="カスタム項目ID" style="width:160px;">' +
+              '<input type="text" id="doc-' + i + '-jinjeritem" value="' + escAttr(d.jinjerCustomItemId || '') + '" placeholder="カスタム項目ID（表裏2枚可の場合は表面）" style="width:200px;">' +
+              '<input type="text" id="doc-' + i + '-jinjeritem2" value="' + escAttr(d.jinjerCustomItemId2 || '') + '" placeholder="カスタム項目ID・2枚目(裏面)用（表裏2枚可の場合のみ）" style="width:240px;">' +
               '<input type="text" id="doc-' + i + '-jinjerrecord" value="' + escAttr(d.jinjerRecordCode || '') + '" placeholder="項目追加(横)なら auto（自動作成）、または番号を直接指定" style="width:260px;">' +
               '</div>' +
               '<div style="height:6px;"></div>' +
@@ -1730,6 +1733,7 @@
         textAllowed: document.getElementById('doc-' + i + '-text').checked,
         sensitive: document.getElementById('doc-' + i + '-sens').checked,
         optional: document.getElementById('doc-' + i + '-optional').checked,
+        dualFile: document.getElementById('doc-' + i + '-dualfile').checked,
         description: document.getElementById('doc-' + i + '-desc').value,
         condition: condType && condVal ? { type: condType, value: condVal } : undefined,
         companies: companies,
@@ -1737,6 +1741,7 @@
         sampleImages: sampleImages,
         jinjerCustomMenuId: document.getElementById('doc-' + i + '-jinjermenu').value.trim(),
         jinjerCustomItemId: document.getElementById('doc-' + i + '-jinjeritem').value.trim(),
+        jinjerCustomItemId2: document.getElementById('doc-' + i + '-jinjeritem2').value.trim(),
         jinjerRecordCode: document.getElementById('doc-' + i + '-jinjerrecord').value.trim()
       };
       callServer_('settingsSaveDocConfig', [doc, i]).then(renderSettingsAndToast_).catch(showError);

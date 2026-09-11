@@ -553,6 +553,7 @@ export async function adminSendFilesToJinjer(env: Env, email: string, employeeId
   if (!employee.JinjerEmployeeId) {
     throw new ApiError('jinjerの社員番号が未設定です（設定 > 新入社員登録の個別編集で入力してください）');
   }
+  const jinjerEmployeeId = employee.JinjerEmployeeId;
   const { baseUrl, accessToken } = await requireJinjerConfig(env);
 
   const docTypes = await loadDocTypes(env.DB);
@@ -579,41 +580,69 @@ export async function adminSendFilesToJinjer(env: Env, email: string, employeeId
   // 「jinjerファイル送信」の実行記録が無いことを確認済みのため、この時点では該当書類は存在しない。
   const autoRecordCodeByMenu = new Map<string, string>();
   const newRecordCodeByMenu = new Map<string, string>();
-  let sentCount = 0;
-  for (const d of targets) {
-    const sub = subs[d.key];
-    const obj = await getEmployeeFile(env.DOCS, sub.StorageKey);
-    if (!obj) continue;
-    const extMatch = sub.StorageKey.match(/\.([^./]+)$/);
-    const ext = extMatch ? `.${extMatch[1]}` : '';
-    const isResend = !!sub.JinjerSentStorageKey && sub.JinjerSentStorageKey !== sub.StorageKey;
 
+  async function resolveRecordCode(d: DocType, isResend: boolean): Promise<string | undefined> {
     let recordCode = d.jinjerRecordCode || undefined;
     if (recordCode === 'auto') {
       const menuId = d.jinjerCustomMenuId!;
       if (isResend) {
         if (!newRecordCodeByMenu.has(menuId)) {
-          newRecordCodeByMenu.set(menuId, await createNewAddibleCustomItemRecordCode(baseUrl, accessToken, employee.JinjerEmployeeId, menuId));
+          newRecordCodeByMenu.set(menuId, await createNewAddibleCustomItemRecordCode(baseUrl, accessToken, jinjerEmployeeId, menuId));
         }
         recordCode = newRecordCodeByMenu.get(menuId);
       } else {
         if (!autoRecordCodeByMenu.has(menuId)) {
-          autoRecordCodeByMenu.set(menuId, await ensureAddibleCustomItemRecordCode(baseUrl, accessToken, employee.JinjerEmployeeId, menuId));
+          autoRecordCodeByMenu.set(menuId, await ensureAddibleCustomItemRecordCode(baseUrl, accessToken, jinjerEmployeeId, menuId));
         }
         recordCode = autoRecordCodeByMenu.get(menuId);
       }
     }
+    return recordCode;
+  }
 
-    await attachFile(baseUrl, accessToken, {
-      employeeId: employee.JinjerEmployeeId,
-      customMenuId: d.jinjerCustomMenuId!,
-      customItemId: d.jinjerCustomItemId!,
-      recordCode,
-      fileName: `${employee.Name}_${d.label}${ext}`,
-      bytes: await obj.arrayBuffer()
-    });
-    await markJinjerSent(env.DB, employeeId, d.key, sub.StorageKey);
-    sentCount++;
+  let sentCount = 0;
+  for (const d of targets) {
+    const sub = subs[d.key];
+    const obj = await getEmployeeFile(env.DOCS, sub.StorageKey);
+    if (obj) {
+      const extMatch = sub.StorageKey.match(/\.([^./]+)$/);
+      const ext = extMatch ? `.${extMatch[1]}` : '';
+      const isResend = !!sub.JinjerSentStorageKey && sub.JinjerSentStorageKey !== sub.StorageKey;
+      const recordCode = await resolveRecordCode(d, isResend);
+
+      await attachFile(baseUrl, accessToken, {
+        employeeId: employee.JinjerEmployeeId,
+        customMenuId: d.jinjerCustomMenuId!,
+        customItemId: d.jinjerCustomItemId!,
+        recordCode,
+        fileName: `${employee.Name}_${d.label}${d.dualFile ? '(表面)' : ''}${ext}`,
+        bytes: await obj.arrayBuffer()
+      });
+      await markJinjerSent(env.DB, employeeId, d.key, sub.StorageKey);
+      sentCount++;
+    }
+
+    // dualFileの2枚目(裏面)。1枚目とは別のカスタム項目IDに、同じメニュー内のレコードとして送る
+    if (d.dualFile && d.jinjerCustomItemId2 && sub.StorageKey2) {
+      const obj2 = await getEmployeeFile(env.DOCS, sub.StorageKey2);
+      if (obj2) {
+        const extMatch2 = sub.StorageKey2.match(/\.([^./]+)$/);
+        const ext2 = extMatch2 ? `.${extMatch2[1]}` : '';
+        const isResend2 = !!sub.JinjerSentStorageKey2 && sub.JinjerSentStorageKey2 !== sub.StorageKey2;
+        const recordCode2 = await resolveRecordCode(d, isResend2);
+
+        await attachFile(baseUrl, accessToken, {
+          employeeId: employee.JinjerEmployeeId,
+          customMenuId: d.jinjerCustomMenuId!,
+          customItemId: d.jinjerCustomItemId2,
+          recordCode: recordCode2,
+          fileName: `${employee.Name}_${d.label}(裏面)${ext2}`,
+          bytes: await obj2.arrayBuffer()
+        });
+        await markJinjerSent(env.DB, employeeId, d.key, sub.StorageKey2, 2);
+        sentCount++;
+      }
+    }
   }
   if (!sentCount) throw new ApiError('送信対象のファイル実体が見つかりませんでした');
 
