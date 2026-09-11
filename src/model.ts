@@ -58,7 +58,7 @@ export const DOC_TYPES: DocType[] = [
       '📮 まずは写真で提出いただき、原本は別途郵送・持参をお願いします。'
   },
   {
-    key: 'bank', label: '⚠️ 給与振込先届',
+    key: 'bank', label: '給与振込先届',
     description: '🏦 給与の振込先を確認するための書類です。通帳のコピーなど、口座名義・口座番号・支店名がわかるものを提出してください。'
   },
   {
@@ -68,7 +68,7 @@ export const DOC_TYPES: DocType[] = [
       'お持ちでない方・紛失された方・有効期限が切れている方は、発行までお時間がかかりますので、お早めに申請してください。'
   },
   {
-    key: 'residence', label: '⚠️ 住民票', requiresOriginal: true,
+    key: 'residence', label: '住民票', requiresOriginal: true,
     description:
       '🏠 「住民票」ではなく「住民票謄本」を提出してください。\n' +
       '⚠️ 住民票とは異なりますのでご注意ください！\n' +
@@ -87,7 +87,7 @@ export const DOC_TYPES: DocType[] = [
       '📮 原本は別途郵送・持参をお願いします。'
   },
   {
-    key: 'withholding', label: '⚠️ 源泉徴収票（前職分）', requiresOriginal: true, pdfAllowed: true,
+    key: 'withholding', label: '源泉徴収票（前職分）', requiresOriginal: true, pdfAllowed: true,
     description:
       '💰 前職やアルバイト先がある方が対象です。入社年の1月から入社前月までの期間に働いていた分を提出してください（その期間に就業していない場合は提出不要です）。\n\n' +
       '・複数の勤務先がある場合は、勤務先ごとに提出してください\n' +
@@ -95,7 +95,7 @@ export const DOC_TYPES: DocType[] = [
       '📮 原本、またはデータをお持ちの場合はそのデータでご提出ください（写真での提出はご遠慮ください）。'
   },
   {
-    key: 'graduationCertificate', label: '⚠️ 卒業証明書', pdfAllowed: true,
+    key: 'graduationCertificate', label: '卒業証明書', pdfAllowed: true,
     description:
       '🎓 卒業した学校が発行する「卒業証明書」を提出してください。\n' +
       '⚠️ 「卒業見込証明書」とは異なりますのでご注意ください！\n' +
@@ -127,7 +127,7 @@ export const DOC_TYPES: DocType[] = [
     jinjerCustomMenuId: '3', jinjerCustomItemId: '19', jinjerRecordCode: 'auto'
   },
   {
-    key: 'certificate1', label: '⚠️ 資格証明書（1）', optional: true,
+    key: 'certificate1', label: '資格証明書（1）', optional: true,
     description:
       'お持ちの資格・免許があれば証明書の写しを提出してください（国家整備士資格・宅地建物取引士（宅建）など。必須ではありません。お持ちでない場合は提出不要です）。最大3件まで登録できます。\n\n' +
       '⚠️ 資格の合格証・免許証そのものではなく、受験票や講習の案内など「資格を証明する書類ではないもの」を提出してしまうケースがあります。下記の見本もあわせてご確認ください。',
