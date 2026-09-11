@@ -95,6 +95,17 @@
     .doctbl .detailrow.closed { display:none; }
     .doctbl .detailrow td { padding:0 6px 12px; }
     .doctbl .detailrow .inner { background:#F6F8F7; border-radius:8px; padding:10px 12px; }
+    .acc-head { display:flex; align-items:center; gap:8px; cursor:pointer; flex-wrap:wrap; }
+    .acc-head b { font-size:.9rem; }
+    .acc-head .flags { display:flex; gap:5px; flex-wrap:wrap; flex:1; }
+    .acc-head .chev { color:#8A9490; transition:transform .15s ease; flex:none; }
+    .acc-head.open .chev { transform:rotate(90deg); }
+    .acc-body { display:none; padding-top:10px; margin-top:10px; border-top:1px solid #EEF0F1; }
+    .acc-body.open { display:block; }
+    .badge { display:inline-block; font-size:.7rem; font-weight:700; padding:2px 8px; border-radius:999px; background:#E7EAF2; color:#3A4E75; }
+    .badge.on { background:#E9F5EA; color:#3F9142; }
+    .badge.warn { background:#FBEAE8; color:#C1443A; }
+    .badge.optional { background:#FBF0DD; color:#C4881B; }
     @media (max-width:620px) {
       .doctbl td.dstatus { width:auto; }
     }
@@ -1081,6 +1092,30 @@
       });
     }
 
+    // 書類マスタ一覧: 折りたたみ時に見出しへ表示する、既定値から外れている設定の要約バッジ
+    function docFlagBadgesHtml_(d) {
+      var html = '';
+      if (d.requiresOriginal) html += '<span class="badge on">原本必要</span>';
+      if (d.pdfAllowed) html += '<span class="badge on">PDF可</span>';
+      if (d.wordAllowed) html += '<span class="badge on">Word可</span>';
+      if (d.textAllowed) html += '<span class="badge on">テキスト可</span>';
+      if (d.photoAllowed === false) html += '<span class="badge warn">写真不可</span>';
+      if (d.sensitive) html += '<span class="badge warn">機微情報</span>';
+      if (d.optional) html += '<span class="badge optional">任意</span>';
+      if (d.condition) html += '<span class="badge">条件:' + (d.condition.type === 'commute' ? '通勤' : '免許') + '=' + escAttr(d.condition.value) + '</span>';
+      if ((d.companies || []).length) html += '<span class="badge">対象法人 ' + d.companies.length + '件</span>';
+      if ((d.hireTypes || []).length) html += '<span class="badge">対象区分 ' + escAttr(d.hireTypes.join('/')) + '</span>';
+      return html;
+    }
+
+    function toggleDocAcc_(i) {
+      var head = document.getElementById('accHead-' + i);
+      var body = document.getElementById('accBody-' + i);
+      if (!head || !body) return;
+      head.classList.toggle('open');
+      body.classList.toggle('open');
+    }
+
     // 書類マスタの並び替え
     function enableDocDrag_() {
       var list = document.getElementById('docList');
@@ -1332,8 +1367,14 @@
             var docCompanies = d.companies || [];
             var docHireTypes = d.hireTypes || [];
             return '<div class="doc-row" data-key="' + escAttr(d.key) + '">' +
-              '<div class="row-flex"><span class="handle" style="cursor:grab;color:#C4CCC9;">⠿</span>' +
-              '<input type="text" id="doc-' + i + '-label" value="' + escAttr(d.label) + '" placeholder="書類名" style="flex:1;font-weight:700;"></div>' +
+              '<div class="acc-head" id="accHead-' + i + '" onclick="toggleDocAcc_(' + i + ')">' +
+              '<span class="handle" style="cursor:grab;color:#C4CCC9;">⠿</span>' +
+              '<b>' + escHtml_(d.label) + '</b>' +
+              '<div class="flags">' + docFlagBadgesHtml_(d) + '</div>' +
+              '<span class="chev">▸</span>' +
+              '</div>' +
+              '<div class="acc-body" id="accBody-' + i + '">' +
+              '<div class="row-flex"><input type="text" id="doc-' + i + '-label" value="' + escAttr(d.label) + '" placeholder="書類名" style="flex:1;font-weight:700;"></div>' +
               '<div class="row-flex" style="margin-top:6px;">' +
               '<label class="check"><input type="checkbox" ' + (d.requiresOriginal ? 'checked' : '') + ' id="doc-' + i + '-req"> 原本必要</label>' +
               '<label class="check"><input type="checkbox" ' + (d.photoAllowed !== false ? 'checked' : '') + ' id="doc-' + i + '-photo"> 写真可</label>' +
@@ -1379,6 +1420,7 @@
               '<button class="btn ghost" onclick="saveDocConfig(' + i + ')">保存</button> ' +
               '<button class="btn danger" onclick="removeDocConfig(\'' + escAttr(d.key) + '\')">削除</button>' +
               '<span class="muted" style="margin-left:8px;">key: ' + d.key + '</span>' +
+              '</div>' +
               '</div>';
           }).join('') +
         '</div>' +
