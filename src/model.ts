@@ -13,6 +13,9 @@ export type DocType = {
   label: string;
   requiresOriginal?: boolean;
   pdfAllowed?: boolean;
+  wordAllowed?: boolean; // Word(.doc/.docx)ファイルの添付も受け付ける
+  textAllowed?: boolean; // ファイル添付の代わりに、テキストを直接入力しての提出も受け付ける
+  photoAllowed?: boolean; // 写真での提出を受け付けるか(未指定/true=可。falseにすると写真提出を禁止)
   sensitive?: boolean;
   condition?: DocCondition;
   companies?: string[]; // 空/未指定なら全社共通。指定した法人の内定者にのみ提出を求める
@@ -28,6 +31,10 @@ export type DocType = {
 };
 
 export const DOC_TYPES: DocType[] = [
+  {
+    key: 'resume', label: '履歴書', requiresOriginal: true, pdfAllowed: true,
+    description: '履歴書を提出してください。すでに原本を提出済みの方は、提出不要です。写真で提出する場合は、文字がはっきり読める状態で撮影してください。PDFデータがあれば、そちらでの提出も可能です。原本は別途郵送・持参をお願いします。'
+  },
   {
     key: 'guarantor', label: '身元保証書', requiresOriginal: true,
     description: '内定者本人と保証人が記入する書類です。必ずボールペンで記入してください。保証人の印鑑証明書もあわせて提出してください（捺印した印鑑と印鑑証明が同じものかご確認ください）。未成年の方は保護者欄への記入も必要です。まずは写真で提出いただき、原本は別途郵送・持参をお願いします。'
@@ -103,6 +110,10 @@ export const DOC_TYPES: DocType[] = [
   {
     key: 'leaseContract', label: '賃貸借契約書の写し', companies: ['佐賀バルーナーズ'],
     description: '入社時の住所で、ご本人名義の賃貸借契約がある方が対象です。契約書の写しを提出してください（ご本人名義の契約がない場合は提出不要です）。'
+  },
+  {
+    key: 'sevenHabitsReport', label: '「7つの習慣」レポート課題', pdfAllowed: true, wordAllowed: true, textAllowed: true, photoAllowed: false,
+    description: '「7つの習慣」の課題レポートを提出してください。本は会社で用意します。お手元にない方はご連絡ください。レポート用紙が足りない方は、公式LINEからダウンロードできます（文字数は自由です）。Word・PDFファイルの添付、または下の入力欄に直接テキストを入力してのご提出も可能です（写真での提出はできません）。'
   }
 ];
 

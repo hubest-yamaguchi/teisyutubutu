@@ -179,6 +179,7 @@ export async function adminGetEmployeeDetail(env: Env, email: string, employeeId
       rejectReason: s.RejectReason || '',
       rejectedAt: s.RejectedAt || '',
       receivedOriginal: !!s.ReceivedOriginal,
+      textContent: s.TextContent || '',
       restrictedView: isMyNumber && !canViewMyNumberFlag,
       hasFile: !!s.StorageKey && !(isMyNumber && !canViewMyNumberFlag)
     };

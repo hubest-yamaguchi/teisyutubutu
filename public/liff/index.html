@@ -146,7 +146,9 @@
       { key: 'certificate3', label: '資格証明書（3）', description: '3件目がある場合のみ(任意)。', requiresOriginal: false, pdfAllowed: false, optional: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
       { key: 'disabilityHandbook', label: '障害者手帳の写し', description: 'お持ちの場合のみ提出してください(任意)。', requiresOriginal: false, pdfAllowed: false, optional: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
       { key: 'bikeInsurance', label: '自転車保険証の写し', description: '', requiresOriginal: false, pdfAllowed: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' },
-      { key: 'leaseContract', label: '賃貸借契約書の写し', description: '', requiresOriginal: false, pdfAllowed: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' }
+      { key: 'leaseContract', label: '賃貸借契約書の写し', description: '', requiresOriginal: false, pdfAllowed: false, status: '対象外', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'resume', label: '履歴書', description: '履歴書を提出してください。', requiresOriginal: true, pdfAllowed: true, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '' },
+      { key: 'sevenHabitsReport', label: '「7つの習慣」レポート課題', description: 'Word・PDFファイルの添付、またはテキストを直接入力してのご提出も可能です（写真での提出はできません）。', pdfAllowed: true, wordAllowed: true, textAllowed: true, photoAllowed: false, status: '未提出', submittedAt: '', rejectReason: '', rejectedAt: '', textContent: '' }
     ];
 
     function demoPayload() {
@@ -192,7 +194,12 @@
         if (fn === 'getMyDocuments' || fn === 'liffBind' || fn === 'getMyStatusByLine') return demoPayload();
         if (fn === 'submitDocument') {
           var doc = DEMO_DOCS.filter(function (d) { return d.key === args[1]; })[0];
-          if (doc) { doc.status = '確認中'; doc.submittedAt = '(デモ)'; doc.rejectReason = ''; }
+          if (doc) { doc.status = '確認中'; doc.submittedAt = '(デモ)'; doc.rejectReason = ''; doc.textContent = ''; }
+          return demoPayload();
+        }
+        if (fn === 'submitDocumentText') {
+          var textDoc = DEMO_DOCS.filter(function (d) { return d.key === args[1]; })[0];
+          if (textDoc) { textDoc.status = '確認中'; textDoc.submittedAt = '(デモ)'; textDoc.rejectReason = ''; textDoc.textContent = args[2]; }
           return demoPayload();
         }
         return demoPayload();
@@ -651,25 +658,49 @@
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
+    var WORD_MIME_TYPES_ = ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+
+    function isWordFile_(file) {
+      return WORD_MIME_TYPES_.indexOf(file.type) !== -1 || /\.docx?$/i.test(file.name || '');
+    }
+
     function openDoc(key) {
       STATE.currentDocKey = key;
       var doc = STATE.docs.filter(function (d) { return d.key === key; })[0];
+      var acceptParts = [];
+      var hints = [];
+      if (doc.photoAllowed !== false) { acceptParts.push('image/*'); hints.push('写真'); }
+      if (doc.pdfAllowed) { acceptParts.push('application/pdf'); hints.push('PDF'); }
+      if (doc.wordAllowed) { acceptParts.push('.doc', '.docx', WORD_MIME_TYPES_[0], WORD_MIME_TYPES_[1]); hints.push('Wordファイル'); }
+      var fileSection = acceptParts.length
+        ? '<p class="muted">' + hints.join('・') + 'を選択してください</p>' +
+          '<input type="file" id="fileInput" accept="' + acceptParts.join(',') + '">' +
+          '<div style="height:10px"></div><button onclick="doUpload()">アップロードする</button>'
+        : '';
+      var textSection = doc.textAllowed
+        ? '<div style="' + (fileSection ? 'margin-top:16px;padding-top:16px;border-top:1px solid #EEF0F1;' : '') + '">' +
+          '<p class="muted">' + (fileSection ? '── またはテキストを直接入力して提出 ──' : 'テキストを直接入力して提出してください') + '</p>' +
+          '<textarea id="textInput" rows="8" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #DBE1DF;border-radius:8px;font-size:.9rem;" placeholder="ここに直接入力してください">' + escHtml_(doc.textContent || '') + '</textarea>' +
+          '<div style="height:10px"></div><button onclick="submitText()">テキストで提出する</button>' +
+          '</div>'
+        : '';
       document.getElementById('uploadArea').innerHTML =
-        '<div class="card"><h2>' + doc.label + 'のアップロード</h2>' +
+        '<div class="card"><h2>' + doc.label + 'の提出</h2>' +
         (doc.description ? '<p class="muted" style="white-space:pre-wrap;">' + escHtml_(doc.description) + '</p>' : '') +
-        '<p class="muted">' + (doc.pdfAllowed ? '画像またはPDFを選択してください' : '写真を選択してください') + '</p>' +
-        '<input type="file" id="fileInput" accept="' + (doc.pdfAllowed ? 'image/*,application/pdf' : 'image/*') + '">' +
-        '<div style="height:10px"></div><button onclick="doUpload()">アップロードする</button>' +
+        fileSection +
+        textSection +
         '<div id="uploadStatus" class="muted" style="margin-top:8px;"></div></div>';
       document.getElementById('uploadArea').scrollIntoView();
     }
 
-    // 画像は縦横1600pxを上限にリサイズしてJPEG圧縮する(4.5MB程度に収めるため)。PDFはそのまま送る。
+    // 画像は縦横1600pxを上限にリサイズしてJPEG圧縮する(4.5MB程度に収めるため)。PDF・Wordファイルはそのまま送る。
     function compressImage_(file) {
       return new Promise(function (resolve, reject) {
-        if (file.type === 'application/pdf') {
+        if (file.type === 'application/pdf' || isWordFile_(file)) {
+          var ext = file.type === 'application/pdf' ? 'pdf' : (/\.docx$/i.test(file.name || '') ? 'docx' : 'doc');
+          var mimeType = file.type || (ext === 'pdf' ? 'application/pdf' : WORD_MIME_TYPES_[ext === 'docx' ? 1 : 0]);
           var r = new FileReader();
-          r.onload = function () { resolve({ base64: r.result.split(',')[1], mimeType: file.type, ext: 'pdf' }); };
+          r.onload = function () { resolve({ base64: r.result.split(',')[1], mimeType: mimeType, ext: ext }); };
           r.onerror = reject;
           r.readAsDataURL(file);
           return;
@@ -696,6 +727,11 @@
       var input = document.getElementById('fileInput');
       var file = input.files[0];
       if (!file) return;
+      var doc = STATE.docs.filter(function (d) { return d.key === STATE.currentDocKey; })[0];
+      if (doc.photoAllowed === false && file.type.indexOf('image/') === 0) {
+        document.getElementById('uploadStatus').textContent = 'この書類は写真での提出に対応していません。Word・PDFファイルを選択してください。';
+        return;
+      }
       showOverlay();
       document.getElementById('uploadStatus').textContent = '画像を圧縮中…';
       compressImage_(file).then(function (result) {
@@ -703,6 +739,15 @@
         callServer_('submitDocument', [STATE.employee.id, STATE.currentDocKey, result.base64, result.mimeType, result.ext])
           .then(applyPayload).catch(showError);
       }).catch(function (err) { hideOverlay(); showError(err); });
+    }
+
+    function submitText() {
+      var text = document.getElementById('textInput').value;
+      var st = document.getElementById('uploadStatus');
+      if (!text || !text.trim()) { st.textContent = '内容を入力してください'; return; }
+      st.textContent = '提出中…';
+      callServer_('submitDocumentText', [STATE.employee.id, STATE.currentDocKey, text])
+        .then(applyPayload).catch(showError);
     }
 
     boot();

@@ -14,6 +14,7 @@ export type Submission = {
   UpdatedAt: string;
   StorageKey: string;
   MimeType: string;
+  TextContent: string; // ファイル添付の代わりに、テキストで直接提出された内容(textAllowedの書類のみ使用)
   JinjerSentStorageKey: string;
 };
 
@@ -45,7 +46,7 @@ export async function getAllSubmissions(db: D1Database): Promise<Record<string, 
 }
 
 export type SubmissionPatch = Partial<
-  Pick<Submission, 'Status' | 'SubmittedAt' | 'RejectReason' | 'RejectedAt' | 'ReceivedOriginal' | 'StorageKey' | 'MimeType'>
+  Pick<Submission, 'Status' | 'SubmittedAt' | 'RejectReason' | 'RejectedAt' | 'ReceivedOriginal' | 'StorageKey' | 'MimeType' | 'TextContent'>
 >;
 
 // upsertSubmission_ と同じ: 既存行があれば更新、なければ既定値+patchで新規作成。UpdatedAtは常に現在時刻。
@@ -66,6 +67,7 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
     ReceivedOriginal: false,
     StorageKey: '',
     MimeType: '',
+    TextContent: '',
     JinjerSentStorageKey: '',
     ...(existing ?? {}),
     ...patch,
@@ -74,12 +76,12 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
 
   await db
     .prepare(
-      `INSERT INTO submissions (EmployeeId, DocKey, Status, SubmittedAt, RejectReason, RejectedAt, ReceivedOriginal, UpdatedAt, StorageKey, MimeType, JinjerSentStorageKey)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO submissions (EmployeeId, DocKey, Status, SubmittedAt, RejectReason, RejectedAt, ReceivedOriginal, UpdatedAt, StorageKey, MimeType, TextContent, JinjerSentStorageKey)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(EmployeeId, DocKey) DO UPDATE SET
          Status=excluded.Status, SubmittedAt=excluded.SubmittedAt, RejectReason=excluded.RejectReason,
          RejectedAt=excluded.RejectedAt, ReceivedOriginal=excluded.ReceivedOriginal, UpdatedAt=excluded.UpdatedAt,
-         StorageKey=excluded.StorageKey, MimeType=excluded.MimeType`
+         StorageKey=excluded.StorageKey, MimeType=excluded.MimeType, TextContent=excluded.TextContent`
     )
     .bind(
       record.EmployeeId,
@@ -92,6 +94,7 @@ export async function upsertSubmission(db: D1Database, employeeId: string, docKe
       record.UpdatedAt,
       record.StorageKey,
       record.MimeType,
+      record.TextContent,
       record.JinjerSentStorageKey
     )
     .run();

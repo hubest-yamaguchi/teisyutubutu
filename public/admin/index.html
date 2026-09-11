@@ -538,6 +538,9 @@
         }
         var reasonHtml = d.status === '差し戻し' ? '<div class="muted" style="color:#C1443A;">' + d.rejectReason + '</div>' : '';
         var metaHtml = d.submittedAt ? '<div class="muted" style="margin-top:4px;">提出日時: ' + d.submittedAt + '</div>' : '';
+        var textHtml = d.textContent
+          ? '<div class="muted" style="margin-top:6px;white-space:pre-wrap;border:1px solid #EEF0F1;border-radius:6px;padding:8px;">' + escHtml_(d.textContent) + '</div>'
+          : '';
         var batchArea = canReject
           ? '<div id="batchArea-' + d.key + '" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid #EEF0F1;">' +
             '<div class="row-flex" id="batchChips-' + d.key + '"></div>' +
@@ -546,7 +549,7 @@
           : '';
         return '<div class="doc-row"><b>' + d.label + (d.requiresOriginal ? '（原本）' : '') + '</b> ' +
           '<span class="pill st-' + d.status + '">' + d.status + '</span>' +
-          reasonHtml + metaHtml +
+          reasonHtml + metaHtml + textHtml +
           '<div style="margin-top:6px;">' + actions + '</div>' +
           batchArea +
           '</div>';
@@ -1266,7 +1269,10 @@
               '<input type="text" id="doc-' + i + '-label" value="' + escAttr(d.label) + '" placeholder="書類名" style="flex:1;font-weight:700;"></div>' +
               '<div class="row-flex" style="margin-top:6px;">' +
               '<label class="check"><input type="checkbox" ' + (d.requiresOriginal ? 'checked' : '') + ' id="doc-' + i + '-req"> 原本必要</label>' +
+              '<label class="check"><input type="checkbox" ' + (d.photoAllowed !== false ? 'checked' : '') + ' id="doc-' + i + '-photo"> 写真可</label>' +
               '<label class="check"><input type="checkbox" ' + (d.pdfAllowed ? 'checked' : '') + ' id="doc-' + i + '-pdf"> PDF可</label>' +
+              '<label class="check"><input type="checkbox" ' + (d.wordAllowed ? 'checked' : '') + ' id="doc-' + i + '-word"> Word可</label>' +
+              '<label class="check"><input type="checkbox" ' + (d.textAllowed ? 'checked' : '') + ' id="doc-' + i + '-text"> テキスト直接入力可</label>' +
               '<label class="check"><input type="checkbox" ' + (d.sensitive ? 'checked' : '') + ' id="doc-' + i + '-sens"> 機微情報</label>' +
               '<label class="check"><input type="checkbox" ' + (d.optional ? 'checked' : '') + ' id="doc-' + i + '-optional"> 任意（未提出でも進捗を止めない）</label>' +
               '</div>' +
@@ -1581,7 +1587,10 @@
         key: d.key,
         label: label,
         requiresOriginal: document.getElementById('doc-' + i + '-req').checked,
+        photoAllowed: document.getElementById('doc-' + i + '-photo').checked,
         pdfAllowed: document.getElementById('doc-' + i + '-pdf').checked,
+        wordAllowed: document.getElementById('doc-' + i + '-word').checked,
+        textAllowed: document.getElementById('doc-' + i + '-text').checked,
         sensitive: document.getElementById('doc-' + i + '-sens').checked,
         optional: document.getElementById('doc-' + i + '-optional').checked,
         description: document.getElementById('doc-' + i + '-desc').value,

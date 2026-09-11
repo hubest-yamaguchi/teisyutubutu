@@ -73,12 +73,16 @@ async function buildDocumentsPayload(db: D1Database, employee: Employee) {
       description: d.description || '',
       requiresOriginal: !!d.requiresOriginal,
       pdfAllowed: !!d.pdfAllowed,
+      wordAllowed: !!d.wordAllowed,
+      textAllowed: !!d.textAllowed,
+      photoAllowed: d.photoAllowed !== false,
       sensitive: !!d.sensitive,
       optional: !!d.optional,
       status: applicableFlag ? s.Status || STATUS.NONE : STATUS.NA,
       submittedAt: s.SubmittedAt || '',
       rejectReason: s.RejectReason || '',
-      rejectedAt: s.RejectedAt || ''
+      rejectedAt: s.RejectedAt || '',
+      textContent: s.TextContent || ''
     };
   });
   base.progressPct = progressPct(employee, subsToStatusMap(subs), docTypes);
@@ -249,6 +253,9 @@ export async function submitDocument(
   const meta = docTypes.find((d) => d.key === docKey);
   if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
   if (!isApplicable(meta, employee)) throw new ApiError('この書類は対象外です');
+  if (meta.photoAllowed === false && mimeType.indexOf('image/') === 0) {
+    throw new ApiError('この書類は写真での提出に対応していません。Word・PDFファイルを添付するか、テキストで提出してください。');
+  }
 
   const seq = docTypes.findIndex((d) => d.key === docKey) + 1;
   const storageKey = await saveEmployeeFile(env.DOCS, employee.EmployeeId, meta.label, seq, base64Data, mimeType, fileExt);
@@ -259,9 +266,40 @@ export async function submitDocument(
     RejectReason: '',
     RejectedAt: '',
     StorageKey: storageKey,
-    MimeType: mimeType
+    MimeType: mimeType,
+    TextContent: ''
   });
   await appendHistory(env.DB, eid, docKey, '提出', `${meta.label}を提出`, '');
+
+  const payload = await buildDocumentsPayload(env.DB, employee);
+  payload.ok = true;
+  return payload;
+}
+
+// テキストを直接入力しての提出(textAllowedの書類のみ)。ファイル添付と同じステータス遷移を使う
+export async function submitDocumentText(env: Env, eid: string, docKey: string, text: string) {
+  const employee = await findEmployeeById(env.DB, eid);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  if (!employee.Company || !employee.Commute) throw new ApiError('先に配属先・通勤手段を回答してください');
+  const trimmed = String(text || '').trim();
+  if (!trimmed) throw new ApiError('内容を入力してください');
+
+  const docTypes = await loadDocTypes(env.DB);
+  const meta = docTypes.find((d) => d.key === docKey);
+  if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
+  if (!isApplicable(meta, employee)) throw new ApiError('この書類は対象外です');
+  if (!meta.textAllowed) throw new ApiError('この書類はテキストでの提出に対応していません');
+
+  await upsertSubmission(env.DB, eid, docKey, {
+    Status: STATUS.REVIEW,
+    SubmittedAt: todayStr(),
+    RejectReason: '',
+    RejectedAt: '',
+    StorageKey: '',
+    MimeType: '',
+    TextContent: trimmed
+  });
+  await appendHistory(env.DB, eid, docKey, '提出', `${meta.label}をテキストで提出`, '');
 
   const payload = await buildDocumentsPayload(env.DB, employee);
   payload.ok = true;

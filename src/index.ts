@@ -77,6 +77,7 @@ const LIFF_FUNCTIONS: Record<string, (env: Env, ...args: any[]) => Promise<unkno
   saveEmergencyContacts: liffApi.saveEmergencyContactsApi,
   getMyDocuments: liffApi.getMyDocuments,
   submitDocument: liffApi.submitDocument,
+  submitDocumentText: liffApi.submitDocumentText,
   getMyStatusByLine: liffApi.getMyStatusByLine
 };
 
