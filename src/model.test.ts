@@ -32,6 +32,13 @@ describe('isApplicable', () => {
     expect(isApplicable(doc, { ...baseEmployee, HireType: '新卒' })).toBe(true);
     expect(isApplicable(doc, { ...baseEmployee, HireType: '中途' })).toBe(true);
   });
+
+  it('個別上書き(requiredOverride)は書類マスタの条件より優先される', () => {
+    const doc = DOC_TYPES.find((d) => d.key === 'carInsurance')!; // 通常は車通勤者のみ対象
+    expect(isApplicable(doc, { ...baseEmployee, Commute: '自転車' }, 1)).toBe(true); // この人だけ対象にする
+    expect(isApplicable(doc, { ...baseEmployee, Commute: '車' }, 0)).toBe(false); // この人だけ対象外にする
+    expect(isApplicable(doc, { ...baseEmployee, Commute: '車' }, null)).toBe(true); // 既定(条件通り)
+  });
 });
 
 describe('computeStage', () => {
@@ -61,6 +68,23 @@ describe('computeStage', () => {
   it('一部だけ提出済みなら「確認中」', () => {
     const docs = { bank: { status: STATUS.REVIEW } };
     expect(computeStage(baseEmployee, docs)).toBe('確認中');
+  });
+
+  it('原本提出待ちはguarantorに限らず、requiresOriginalな書類なら「原本待ち」になる(resumeでも同様)', () => {
+    const applicable = DOC_TYPES.filter((d) => isApplicable(d, baseEmployee));
+    const docs = Object.fromEntries(
+      applicable.map((d) => [d.key, { status: d.key === 'resume' ? STATUS.ORIGINAL_WAIT : STATUS.APPROVED }])
+    );
+    expect(computeStage(baseEmployee, docs)).toBe('原本待ち');
+  });
+
+  it('個別上書きで対象外にした書類は集計から除外される', () => {
+    const applicable = DOC_TYPES.filter((d) => isApplicable(d, baseEmployee)).filter((d) => d.key !== 'bank');
+    const docs: Record<string, { status: string; requiredOverride?: number | null }> = Object.fromEntries(
+      applicable.map((d) => [d.key, { status: STATUS.APPROVED }])
+    );
+    docs.bank = { status: STATUS.NONE, requiredOverride: 0 };
+    expect(computeStage(baseEmployee, docs)).toBe('受入準備完了');
   });
 });
 

@@ -27,9 +27,9 @@ function publicEmployee(employee: Employee) {
   };
 }
 
-function subsToStatusMap(subs: Record<string, { Status: string }>) {
-  const map: Record<string, { status: string }> = {};
-  for (const k of Object.keys(subs)) map[k] = { status: subs[k].Status };
+function subsToStatusMap(subs: Record<string, { Status: string; RequiredOverride?: number | null }>) {
+  const map: Record<string, { status: string; requiredOverride?: number | null }> = {};
+  for (const k of Object.keys(subs)) map[k] = { status: subs[k].Status, requiredOverride: subs[k].RequiredOverride ?? null };
   return map;
 }
 
@@ -65,8 +65,8 @@ async function buildDocumentsPayload(db: D1Database, employee: Employee) {
   const subs = await getSubmissionsMap(db, employee.EmployeeId);
 
   base.docs = docTypes.map((d: DocType) => {
-    const applicableFlag = isApplicable(d, employee);
     const s = subs[d.key] || ({} as any);
+    const applicableFlag = isApplicable(d, employee, s.RequiredOverride ?? null);
     return {
       key: d.key,
       label: d.label,
@@ -252,7 +252,8 @@ export async function submitDocument(
   const docTypes = await loadDocTypes(env.DB);
   const meta = docTypes.find((d) => d.key === docKey);
   if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
-  if (!isApplicable(meta, employee)) throw new ApiError('この書類は対象外です');
+  const existingSub = await getSubmissionsMap(env.DB, eid);
+  if (!isApplicable(meta, employee, existingSub[docKey]?.RequiredOverride ?? null)) throw new ApiError('この書類は対象外です');
   if (meta.photoAllowed === false && mimeType.indexOf('image/') === 0) {
     throw new ApiError('この書類は写真での提出に対応していません。Word・PDFファイルを添付するか、テキストで提出してください。');
   }
@@ -287,7 +288,8 @@ export async function submitDocumentText(env: Env, eid: string, docKey: string, 
   const docTypes = await loadDocTypes(env.DB);
   const meta = docTypes.find((d) => d.key === docKey);
   if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
-  if (!isApplicable(meta, employee)) throw new ApiError('この書類は対象外です');
+  const existingSub = await getSubmissionsMap(env.DB, eid);
+  if (!isApplicable(meta, employee, existingSub[docKey]?.RequiredOverride ?? null)) throw new ApiError('この書類は対象外です');
   if (!meta.textAllowed) throw new ApiError('この書類はテキストでの提出に対応していません');
 
   await upsertSubmission(env.DB, eid, docKey, {

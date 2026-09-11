@@ -103,9 +103,9 @@ function publicEmployee(employee: Employee) {
   };
 }
 
-function subsToStatusMap(subs: Record<string, { Status: string }>) {
-  const map: Record<string, { status: string }> = {};
-  for (const k of Object.keys(subs)) map[k] = { status: subs[k].Status };
+function subsToStatusMap(subs: Record<string, { Status: string; RequiredOverride?: number | null }>) {
+  const map: Record<string, { status: string; requiredOverride?: number | null }> = {};
+  for (const k of Object.keys(subs)) map[k] = { status: subs[k].Status, requiredOverride: subs[k].RequiredOverride ?? null };
   return map;
 }
 
@@ -124,7 +124,7 @@ export async function adminGetDashboard(env: Env, email: string, companyFilter?:
     .map((e) => {
       const subs = allSubs[String(e.EmployeeId)] || {};
       const statusMap = subsToStatusMap(subs as any);
-      const applicable = applicableDocTypes(e, docTypes);
+      const applicable = applicableDocTypes(e, docTypes, statusMap);
       const submittedCount = applicable.filter((d) => (statusMap[d.key]?.status || STATUS.NONE) !== STATUS.NONE).length;
       return {
         id: e.EmployeeId,
@@ -166,8 +166,9 @@ export async function adminGetEmployeeDetail(env: Env, email: string, employeeId
   const canViewMyNumberFlag = await canViewMyNumber(env.DB, email, employee.Company);
 
   const docs = docTypes.map((d: DocType) => {
-    const applicableFlag = isApplicable(d, employee);
     const s = subs[d.key] || ({} as any);
+    const requiredOverride: number | null = s.RequiredOverride ?? null;
+    const applicableFlag = isApplicable(d, employee, requiredOverride);
     const isMyNumber = d.key === 'myNumber';
     return {
       key: d.key,
@@ -180,6 +181,7 @@ export async function adminGetEmployeeDetail(env: Env, email: string, employeeId
       rejectedAt: s.RejectedAt || '',
       receivedOriginal: !!s.ReceivedOriginal,
       textContent: s.TextContent || '',
+      requiredOverride,
       restrictedView: isMyNumber && !canViewMyNumberFlag,
       hasFile: !!s.StorageKey && !(isMyNumber && !canViewMyNumberFlag)
     };
@@ -200,9 +202,22 @@ export async function adminApproveDoc(env: Env, email: string, employeeId: strin
   const docTypes = await loadDocTypes(env.DB);
   const meta = docTypes.find((d) => d.key === docKey);
   if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
-  const newStatus = docKey === 'guarantor' ? STATUS.ORIGINAL_WAIT : STATUS.APPROVED;
+  const newStatus = meta.requiresOriginal ? STATUS.ORIGINAL_WAIT : STATUS.APPROVED;
   await upsertSubmission(env.DB, employeeId, docKey, { Status: newStatus, RejectReason: '' });
   await appendHistory(env.DB, employeeId, docKey, '承認', `${meta.label}を確認・承認`, email);
+  return adminGetEmployeeDetail(env, email, employeeId);
+}
+
+// 個別社員に対する提出要否の上書き(この人だけ対象にする/対象外にする/既定に戻す)。
+// override: 1=対象にする、0=対象外にする、null=既定(書類マスタの条件)に戻す
+export async function adminSetDocRequiredOverride(env: Env, email: string, employeeId: string, docKey: string, override: number | null) {
+  await requireAdmin(env, email);
+  const docTypes = await loadDocTypes(env.DB);
+  const meta = docTypes.find((d) => d.key === docKey);
+  if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
+  await upsertSubmission(env.DB, employeeId, docKey, { RequiredOverride: override === null ? null : override });
+  const label = override === 1 ? 'この人だけ対象にする' : override === 0 ? 'この人だけ対象外にする' : '既定(書類マスタの条件)に戻す';
+  await appendHistory(env.DB, employeeId, docKey, '個別設定', `${meta.label}: ${label}`, email);
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 
@@ -229,13 +244,17 @@ export async function adminRejectDocsBatch(env: Env, email: string, employeeId: 
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 
-export async function adminToggleOriginalReceived(env: Env, email: string, employeeId: string, received: boolean) {
+export async function adminToggleOriginalReceived(env: Env, email: string, employeeId: string, docKey: string, received: boolean) {
   await requireAdmin(env, email);
-  await upsertSubmission(env.DB, employeeId, 'guarantor', {
+  const docTypes = await loadDocTypes(env.DB);
+  const meta = docTypes.find((d) => d.key === docKey);
+  if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
+  if (!meta.requiresOriginal) throw new ApiError('この書類は原本提出が必要な書類として設定されていません');
+  await upsertSubmission(env.DB, employeeId, docKey, {
     ReceivedOriginal: received,
     Status: received ? STATUS.APPROVED : STATUS.ORIGINAL_WAIT
   });
-  await appendHistory(env.DB, employeeId, 'guarantor', received ? '原本受領' : '原本受領取消', '', email);
+  await appendHistory(env.DB, employeeId, docKey, received ? '原本受領' : '原本受領取消', '', email);
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 
@@ -289,7 +308,7 @@ export async function adminGetZipManifest(env: Env, email: string, employeeId: s
   const subs = await getSubmissionsMap(env.DB, employeeId);
 
   const files = docTypes
-    .filter((d) => isApplicable(d, employee))
+    .filter((d) => isApplicable(d, employee, subs[d.key]?.RequiredOverride))
     .filter((d) => d.key !== 'myNumber' || canViewMyNumberFlag)
     .map((d) => ({ d, sub: subs[d.key] }))
     .filter(({ sub }) => sub && sub.StorageKey)
@@ -379,7 +398,7 @@ export async function adminSaveToDrive(env: Env, email: string, employeeId: stri
 
   const docTypes = await loadDocTypes(env.DB);
   const subs = await getSubmissionsMap(env.DB, employeeId);
-  const targets = applicableDocTypes(employee, docTypes).filter(
+  const targets = applicableDocTypes(employee, docTypes, subsToStatusMap(subs as any)).filter(
     (d) => subs[d.key]?.Status === STATUS.APPROVED && subs[d.key]?.StorageKey
   );
   if (!targets.length) throw new ApiError('Driveに保存できる承認済み書類がありません');
@@ -510,7 +529,7 @@ export async function adminSendFilesToJinjer(env: Env, email: string, employeeId
 
   const docTypes = await loadDocTypes(env.DB);
   const subs = await getSubmissionsMap(env.DB, employeeId);
-  const targets = applicableDocTypes(employee, docTypes).filter(
+  const targets = applicableDocTypes(employee, docTypes, subsToStatusMap(subs as any)).filter(
     (d) => d.jinjerCustomMenuId && d.jinjerCustomItemId && subs[d.key]?.Status === STATUS.APPROVED && subs[d.key]?.StorageKey
   );
   if (!targets.length) {

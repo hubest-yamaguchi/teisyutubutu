@@ -158,6 +158,7 @@ const ADMIN_FUNCTIONS: Record<string, (env: Env, email: string, ...args: any[]) 
   adminApproveDoc: adminApi.adminApproveDoc,
   adminRejectDocsBatch: adminApi.adminRejectDocsBatch,
   adminToggleOriginalReceived: adminApi.adminToggleOriginalReceived,
+  adminSetDocRequiredOverride: adminApi.adminSetDocRequiredOverride,
   adminSaveToDrive: adminApi.adminSaveToDrive,
   adminTestJinjerConnection: adminApi.adminTestJinjerConnection,
   adminSyncJinjerMunicipalities: adminApi.adminSyncJinjerMunicipalities,

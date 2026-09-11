@@ -416,7 +416,7 @@
       var data = window.__lastDashboard;
       if (!data) return;
       var kpiKeys = ['total', '未提出', '確認中', '差し戻し', '原本待ち', '受入準備完了'];
-      var kpiLabels = { total: '全新入社員', '未提出': '未提出', '確認中': '確認中', '差し戻し': '差し戻し中', '原本待ち': '原本提出待ち', '受入準備完了': '受入準備完了' };
+      var kpiLabels = { total: '全新入社員', '未提出': '未提出', '確認中': '確認中', '差し戻し': '差し戻し中', '原本待ち': '⚠️ 原本提出待ち', '受入準備完了': '受入準備完了' };
       var kpiHtml = kpiKeys.map(function (k) {
         var filterVal = k === 'total' ? null : k;
         var isActive = DASH_STAGE_FILTER === filterVal;
@@ -513,13 +513,32 @@
       }).join('');
     }
 
+    // 個別社員に対する提出要否の上書き操作(この人だけ対象にする/対象外にする/既定に戻す)。
+    // 対象外にする→もう提出させない書類、対象にする→書類マスタの条件では対象外だが個別に提出を求めたい書類、向けの例外設定
+    function overrideActionHtml_(d) {
+      var toggleBtn = d.status === '対象外'
+        ? '<button class="btn ghost" onclick="setDocOverride(\'' + d.key + '\', 1)">提出対象にする</button> '
+        : '<button class="btn ghost" onclick="setDocOverride(\'' + d.key + '\', 0)">提出対象外にする</button> ';
+      var resetBtn = (d.requiredOverride === 1 || d.requiredOverride === 0)
+        ? '<button class="btn ghost" onclick="setDocOverride(\'' + d.key + '\', null)">既定に戻す</button> '
+        : '';
+      return toggleBtn + resetBtn;
+    }
+
+    function statusPillHtml_(d) {
+      var label = d.status === '原本提出待ち' ? '⚠️ 原本提出待ち' : d.status;
+      return '<span class="pill st-' + d.status + '">' + label + '</span>';
+    }
+
     function renderDetail(data) {
       CURRENT_DETAIL_ID = data.employee.id;
       BATCH_REJECT_KEYS = [];
       var e = data.employee;
       var docsHtml = data.docs.map(function (d) {
         if (d.status === '対象外') {
-          return '<div class="doc-row" style="opacity:.5;"><b>' + d.label + '</b> <span class="pill st-対象外">対象外</span></div>';
+          return '<div class="doc-row" style="opacity:.5;"><b>' + d.label + '</b> ' + statusPillHtml_(d) +
+            '<div style="margin-top:6px;opacity:1;">' + overrideActionHtml_(d) + '</div>' +
+            '</div>';
         }
         if (d.restrictedView) {
           return '<div class="doc-row"><b>' + d.label + '</b> <span class="muted">（マイナンバー閲覧権限が無いため非表示）</span></div>';
@@ -533,9 +552,16 @@
         if (d.status === '確認中') {
           actions += '<button class="btn approve" onclick="approveDoc(\'' + d.key + '\')">承認</button> ';
         }
+        if (d.requiresOriginal && d.status === '原本提出待ち') {
+          actions += '<button class="btn approve" onclick="toggleOriginalReceived(\'' + d.key + '\', true)">原本を受領した</button> ';
+        }
+        if (d.requiresOriginal && d.receivedOriginal) {
+          actions += '<button class="btn ghost" onclick="toggleOriginalReceived(\'' + d.key + '\', false)">原本受領を取消</button> ';
+        }
         if (canReject) {
           actions += '<label class="check" style="margin-left:4px;"><input type="checkbox" onchange="toggleBatchReject(\'' + d.key + '\', this.checked)"> 差し戻す</label>';
         }
+        actions += overrideActionHtml_(d);
         var reasonHtml = d.status === '差し戻し' ? '<div class="muted" style="color:#C1443A;">' + d.rejectReason + '</div>' : '';
         var metaHtml = d.submittedAt ? '<div class="muted" style="margin-top:4px;">提出日時: ' + d.submittedAt + '</div>' : '';
         var textHtml = d.textContent
@@ -548,7 +574,7 @@
             '</div>'
           : '';
         return '<div class="doc-row"><b>' + d.label + (d.requiresOriginal ? '（原本）' : '') + '</b> ' +
-          '<span class="pill st-' + d.status + '">' + d.status + '</span>' +
+          statusPillHtml_(d) +
           reasonHtml + metaHtml + textHtml +
           '<div style="margin-top:6px;">' + actions + '</div>' +
           batchArea +
@@ -710,6 +736,14 @@
 
     function approveDoc(docKey) {
       callServer_('adminApproveDoc', [CURRENT_DETAIL_ID, docKey]).then(function () { loadDashboard(); }).catch(showError);
+    }
+
+    function toggleOriginalReceived(docKey, received) {
+      callServer_('adminToggleOriginalReceived', [CURRENT_DETAIL_ID, docKey, received]).then(function () { loadDashboard(); }).catch(showError);
+    }
+
+    function setDocOverride(docKey, override) {
+      callServer_('adminSetDocRequiredOverride', [CURRENT_DETAIL_ID, docKey, override]).then(function () { loadDashboard(); }).catch(showError);
     }
 
     // 「書類を保存」プルダウン(ZIPダウンロード/Google Drive/jinjer送信をまとめた1つの入り口)

@@ -150,7 +150,9 @@ export type EmployeeLike = {
   HireType?: string;
 };
 
-export type DocStatusMap = Record<string, { status?: string }>;
+// requiredOverride: 個別社員に対する提出要否の上書き(submissions.RequiredOverrideの値)。
+// null/undefined=通常通り書類マスタの条件で判定。1=この人だけ強制的に対象にする。0=この人だけ強制的に対象外にする。
+export type DocStatusMap = Record<string, { status?: string; requiredOverride?: number | null }>;
 
 export function docMeta(key: string, docTypes: DocType[] = DOC_TYPES): DocType | null {
   return docTypes.find((d) => d.key === key) ?? null;
@@ -158,7 +160,10 @@ export function docMeta(key: string, docTypes: DocType[] = DOC_TYPES): DocType |
 
 // employeeはEmployees行相当(Company/Commute/HasLicenseはこの綴りのプロパティ名)を想定。
 // 配属先(companies)・通勤手段・運転免許証の有無(condition)は独立した軸なので、すべての条件を満たす場合のみ対象とする。
-export function isApplicable(doc: DocType, employee: EmployeeLike): boolean {
+// requiredOverrideが指定されている場合は、書類マスタの条件より優先する(個別社員向けの例外設定)。
+export function isApplicable(doc: DocType, employee: EmployeeLike, requiredOverride?: number | null): boolean {
+  if (requiredOverride === 1) return true;
+  if (requiredOverride === 0) return false;
   if (doc.companies && doc.companies.length > 0 && !doc.companies.includes(employee.Company || '')) return false;
   if (doc.hireTypes && doc.hireTypes.length > 0 && !doc.hireTypes.includes(employee.HireType || '')) return false;
   if (doc.condition) {
@@ -168,15 +173,15 @@ export function isApplicable(doc: DocType, employee: EmployeeLike): boolean {
   return true;
 }
 
-export function applicableDocTypes(employee: EmployeeLike, docTypes: DocType[] = DOC_TYPES): DocType[] {
-  return docTypes.filter((d) => isApplicable(d, employee));
+export function applicableDocTypes(employee: EmployeeLike, docTypes: DocType[] = DOC_TYPES, docsByKey: DocStatusMap = {}): DocType[] {
+  return docTypes.filter((d) => isApplicable(d, employee, docsByKey[d.key]?.requiredOverride));
 }
 
 // 進捗率・完了判定(受入準備完了かどうか)の対象となる書類。資格証明書のような任意(optional)の書類は、
 // 未提出(NONE)のままなら対象から除外する(持っていない人がずっと「未提出」のまま止まってしまうのを防ぐ)。
 // 提出済みになった場合は通常の書類と同じ扱いに戻り、承認されるまでは完了とみなさない。
 function relevantDocTypes(employee: EmployeeLike, docsByKey: DocStatusMap, docTypes: DocType[]): DocType[] {
-  return applicableDocTypes(employee, docTypes).filter(
+  return applicableDocTypes(employee, docTypes, docsByKey).filter(
     (d) => !d.optional || (docsByKey[d.key]?.status || STATUS.NONE) !== STATUS.NONE
   );
 }
@@ -187,10 +192,17 @@ export function computeStage(employee: EmployeeLike, docsByKey: DocStatusMap, do
 
   if (statuses.includes(STATUS.REJECTED)) return '差し戻し';
 
-  const others = applicable.filter((d) => d.key !== 'guarantor');
-  const othersApproved = others.every((d) => (docsByKey[d.key]?.status || STATUS.NONE) === STATUS.APPROVED);
-  const guarantorStatus = docsByKey.guarantor?.status || STATUS.NONE;
-  if (othersApproved && guarantorStatus === STATUS.ORIGINAL_WAIT) return '原本待ち';
+  // 原本の提出が必要な書類(requiresOriginal)は、guarantor(身元保証書)に限らずどれでも同じ扱いにする。
+  // それ以外の書類がすべて承認済みで、原本必要な書類が(承認済みor原本提出待ち)かつ1件でも原本提出待ちなら「原本待ち」。
+  const originalDocs = applicable.filter((d) => d.requiresOriginal);
+  const otherDocs = applicable.filter((d) => !d.requiresOriginal);
+  const othersApproved = otherDocs.every((d) => (docsByKey[d.key]?.status || STATUS.NONE) === STATUS.APPROVED);
+  const originalDocsSettled = originalDocs.every((d) => {
+    const s = docsByKey[d.key]?.status || STATUS.NONE;
+    return s === STATUS.APPROVED || s === STATUS.ORIGINAL_WAIT;
+  });
+  const anyOriginalWaiting = originalDocs.some((d) => (docsByKey[d.key]?.status || STATUS.NONE) === STATUS.ORIGINAL_WAIT);
+  if (othersApproved && originalDocsSettled && anyOriginalWaiting) return '原本待ち';
 
   if (statuses.every((s) => s === STATUS.NONE)) return '未提出';
   if (statuses.every((s) => s === STATUS.APPROVED)) return '受入準備完了';

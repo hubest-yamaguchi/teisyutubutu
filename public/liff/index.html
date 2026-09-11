@@ -624,9 +624,10 @@
         }
         var clickable = (d.status === '未提出' || d.status === '差し戻し');
         var optionalBadge = d.optional ? ' <span class="muted" style="font-size:.72rem;">（任意）</span>' : '';
+        var statusLabel = d.status === '原本提出待ち' ? '⚠️ 原本提出待ち' : d.status;
         rows += '<div class="doc-row" onclick="' + (clickable ? "openDoc('" + d.key + "')" : '') + '">' +
           '<span>' + d.label + (d.requiresOriginal ? '（原本）' : '') + optionalBadge + '</span>' +
-          '<span class="pill st-' + d.status + '">' + d.status + '</span></div>';
+          '<span class="pill st-' + d.status + '">' + statusLabel + '</span></div>';
       });
 
       var rejected = res.docs.filter(function (d) { return d.status === '差し戻し'; });
