@@ -40,7 +40,7 @@ export const DOC_TYPES: DocType[] = [
       '📄 履歴書を提出してください。\n' +
       '✅ すでに原本を提出済みの方は、提出不要です。\n\n' +
       '写真で提出する場合は、文字がはっきり読める状態で撮影してください。PDFデータがあれば、そちらでの提出も可能です。\n' +
-      '📮 原本は別途郵送・持参をお願いします。'
+      '📮 原本は別途提出をお願いします。'
   },
   {
     key: 'guarantor', label: '身元保証書', requiresOriginal: true,
@@ -55,11 +55,14 @@ export const DOC_TYPES: DocType[] = [
       '⑥未成年の方は保護者欄への記入も必要です\n' +
       '⑦記入を間違えた場合は書き直すか、訂正印（認め印）で訂正してください\n' +
       '⑧様式は公式LINEからダウンロードできます（配属先ごとに様式が異なるので印刷時にご注意ください）\n\n' +
-      '📮 まずは写真で提出いただき、原本は別途郵送・持参をお願いします。'
+      '📮 まずは写真で提出いただき、原本は別途提出をお願いします。'
   },
   {
     key: 'bank', label: '給与振込先届',
-    description: '🏦 給与の振込先を確認するための書類です。通帳のコピーなど、口座名義・口座番号・支店名がわかるものを提出してください。'
+    description:
+      '🏦 給与の振込先を確認するための書類です。通帳のコピーなど、口座名義・口座番号・支店名がわかるものを提出してください。\n\n' +
+      '💡 佐賀バルーナーズにご配属の方は、佐賀銀行の口座をご用意ください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '17', jinjerRecordCode: 'auto'
   },
   {
     key: 'myNumber', label: 'マイナンバー確認書類', sensitive: true,
@@ -68,45 +71,33 @@ export const DOC_TYPES: DocType[] = [
       'お持ちでない方・紛失された方・有効期限が切れている方は、発行までお時間がかかりますので、お早めに申請してください。'
   },
   {
-    key: 'residence', label: '住民票', requiresOriginal: true,
+    key: 'residence', label: '住民票', companies: ['ホンダカーズ佐賀', 'モビリティズ', 'たてものや'],
     description:
       '🏠 「住民票」ではなく「住民票謄本」を提出してください。\n' +
       '住民票とは異なりますのでご注意ください！\n' +
       '（世帯全員が記載されたもの。ひとり暮らしの場合はご本人のみで可）\n\n' +
       '・3ヶ月以内に取得したものが必要です\n' +
-      '・役所の窓口のほか、マイナンバーカードがあればコンビニのマルチコピー機でも取得できます（一部のコンビニでは取得できないため事前にご確認ください）\n' +
-      '・引っ越しの予定がある場合は、住所変更後に取得してください\n\n' +
-      '📮 原本は別途郵送・持参をお願いします。'
+      '・役所の窓口（市民課・市民サービス課）のほか、マイナンバーカードがあればコンビニのマルチコピー機でも取得できます（一部のコンビニでは取得できないため事前にご確認ください）\n' +
+      '・引っ越しの予定がある場合は、住所変更後に取得してください',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '15', jinjerRecordCode: 'auto'
   },
   {
-    key: 'health', label: '健康診断書', requiresOriginal: true, pdfAllowed: true,
+    key: 'health', label: '健康診断書', requiresOriginal: true,
     description:
       '🏥 学校や職場で受診した直近1年以内の健康診断書を提出してください。\n\n' +
-      '受診されていない方・最後の受診から1年以上経過している方は、病院での受診が必要です（検査項目は「入社時に必要な検査項目」とお伝えください）。\n\n' +
-      '💰 会社負担での受診をご希望の場合は、事前にご連絡ください。精算のため、宛名が個人名でインボイス対応の領収書が必要です。\n\n' +
-      '📮 原本は別途郵送・持参をお願いします。'
+      '受診されていない方・最後の受診から1年以上経過している方は、病院での受診が必要です（会社負担）。検査項目は病院で「入社時に必要な検査項目」とお伝えください（相場は10,000円程度です）。\n\n' +
+      '💰 会社負担での受診をご希望の場合は、事前にご連絡ください。精算のため、宛名が個人名でインボイス対応の領収書が必要です（費用は入社後にお渡しします）。\n\n' +
+      '📮 原本は別途提出をお願いします。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '6', jinjerRecordCode: 'auto'
   },
   {
-    key: 'withholding', label: '源泉徴収票（前職分）', requiresOriginal: true, pdfAllowed: true,
+    key: 'withholding', label: '源泉徴収票（前職分）', pdfAllowed: true,
     description:
       '💰 前職やアルバイト先がある方が対象です。入社年の1月から入社前月までの期間に働いていた分を提出してください（その期間に就業していない場合は提出不要です）。\n\n' +
       '・複数の勤務先がある場合は、勤務先ごとに提出してください\n' +
-      '・ヒューベストグループ内でのアルバイト分は会社側で確認できるため提出不要です\n\n' +
+      '・ヒューベストグループ内でのアルバイト分は会社側で確認できるため提出不要です\n' +
+      '・入社直前まで勤務予定の場合は、入社後の提出でも構いません\n\n' +
       '📮 原本、またはデータをお持ちの場合はそのデータでご提出ください（写真での提出はご遠慮ください）。'
-  },
-  {
-    key: 'graduationCertificate', label: '卒業証明書', pdfAllowed: true,
-    description:
-      '🎓 卒業した学校が発行する「卒業証明書」を提出してください。\n' +
-      '「卒業見込証明書」とは異なりますのでご注意ください！\n' +
-      '高校卒業の方は「卒業証書」のコピーでも構いません。\n\n' +
-      '学校の窓口や証明書発行システムで取得できます。'
-  },
-  {
-    key: 'carRegistration', label: '車検証の写し', condition: { type: 'commute', value: '車' },
-    description: '🚗 車で通勤される方が対象です。通勤に使用する車の車検証を提出してください。',
-    sampleImages: [{ url: '/liff/samples/car-registration.png', caption: '車検証の見本（2023年1月4日より電子化されています）' }],
-    jinjerCustomMenuId: '3', jinjerCustomItemId: '2', jinjerRecordCode: 'auto'
   },
   {
     key: 'carInsurance', label: '自動車保険証券の写し', condition: { type: 'commute', value: '車' },
@@ -117,53 +108,43 @@ export const DOC_TYPES: DocType[] = [
     jinjerCustomMenuId: '3', jinjerCustomItemId: '3', jinjerRecordCode: 'auto'
   },
   {
-    key: 'licenseFront', label: '運転免許証（表面）', condition: { type: 'hasLicense', value: 'あり' },
-    description: '運転免許証の表面（氏名・生年月日・免許証番号が記載されている面）の写しを提出してください。',
-    jinjerCustomMenuId: '3', jinjerCustomItemId: '18', jinjerRecordCode: 'auto'
-  },
-  {
-    key: 'licenseBack', label: '運転免許証（裏面）', condition: { type: 'hasLicense', value: 'あり' },
-    description: '運転免許証の裏面（本籍・条件等が記載されている面）の写しを提出してください。',
-    jinjerCustomMenuId: '3', jinjerCustomItemId: '19', jinjerRecordCode: 'auto'
-  },
-  {
-    key: 'certificate1', label: '資格証明書（1）', optional: true,
-    description:
-      'お持ちの資格・免許があれば証明書の写しを提出してください（国家整備士資格・宅地建物取引士（宅建）など。必須ではありません。お持ちでない場合は提出不要です）。最大3件まで登録できます。\n\n' +
-      '資格の合格証・免許証そのものではなく、受験票や講習の案内など「資格を証明する書類ではないもの」を提出してしまうケースがあります。下記の見本もあわせてご確認ください。',
-    sampleImages: [
-      { url: '/liff/samples/qualification-correct.jpg', caption: '✅ 正しい例（資格証明書として認められるもの）' },
-      { url: '/liff/samples/qualification-wrong.jpg', caption: '❌ 誤った例（資格証明書として認められないもの）' }
-    ],
-    jinjerCustomMenuId: '3', jinjerCustomItemId: '10', jinjerRecordCode: 'auto'
-  },
-  {
-    key: 'certificate2', label: '資格証明書（2）', optional: true,
-    description: '2件目の資格証明書（国家整備士資格・宅建など）がある場合は、こちらから提出してください。',
-    jinjerCustomMenuId: '3', jinjerCustomItemId: '11', jinjerRecordCode: 'auto'
-  },
-  {
-    key: 'certificate3', label: '資格証明書（3）', optional: true,
-    description: '3件目の資格証明書（国家整備士資格・宅建など）がある場合は、こちらから提出してください。',
-    jinjerCustomMenuId: '3', jinjerCustomItemId: '12', jinjerRecordCode: 'auto'
-  },
-  {
-    key: 'disabilityHandbook', label: '障害者手帳の写し', optional: true,
-    description: '障害者手帳をお持ちの場合は、写しを提出してください（必須ではありません。お持ちでない場合は提出不要です）。',
-    jinjerCustomMenuId: '3', jinjerCustomItemId: '22', jinjerRecordCode: 'auto'
-  },
-  {
     key: 'bikeInsurance', label: '自転車保険証の写し', condition: { type: 'commute', value: '自転車' },
     description:
       '🚲 自転車で通勤される方は、自転車保険への加入が条件です。\n\n' +
       '自転車保険とは、自転車事故によるご自身のケガを補償する「傷害保険」と、他人への賠償に備える「個人賠償責任保険」がセットになった保険です。\n\n' +
       '・加入済みの場合 → 保険証券を提出してください\n' +
       '・未加入の場合 → 加入手続き後、証券を提出してください\n\n' +
-      '💡 ご家族の自動車保険の特約で対応できる場合もあります。迷ったら総務課にご相談ください。'
+      '💡 ご家族の自動車保険の特約で対応できる場合もあります。分からない場合は、総務課にご相談ください。'
   },
   {
     key: 'leaseContract', label: '賃貸借契約書の写し', companies: ['佐賀バルーナーズ'],
     description: '🏠 入社時の住所で、ご本人名義の賃貸借契約がある方が対象です。契約書の写しを提出してください（ご本人名義の契約がない場合は提出不要です）。'
+  },
+  {
+    key: 'carRegistration', label: '車検証の写し', condition: { type: 'commute', value: '車' },
+    description:
+      '🚗 車で通勤される方が対象です。通勤に使用する車の車検証を提出してください。\n\n' +
+      '💡 2023年1月4日より車検証が電子化されました。従来のA4サイズから、ICタグ付きのA6サイズ相当の厚紙に変わっています。',
+    sampleImages: [{ url: '/liff/samples/car-registration.png', caption: '車検証の見本' }],
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '2', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'licenseFront', label: '運転免許証（表面）', condition: { type: 'hasLicense', value: 'あり' },
+    description: '🪪 運転免許証の表面（氏名・生年月日・免許証番号が記載されている面）の写しを提出してください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '18', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'licenseBack', label: '運転免許証（裏面）', condition: { type: 'hasLicense', value: 'あり' },
+    description: '🪪 運転免許証の裏面（本籍・条件等が記載されている面）の写しを提出してください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '19', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'graduationCertificate', label: '卒業証明書', pdfAllowed: true, hireTypes: ['新卒'],
+    description:
+      '🎓 卒業した学校が発行する「卒業証明書」を提出してください。\n' +
+      '「卒業見込証明書」とは異なりますのでご注意ください！\n' +
+      '高校卒業の方は「卒業証書」のコピーでも構いません。\n\n' +
+      '学校の窓口や証明書発行システムで取得できます。'
   },
   {
     key: 'sevenHabitsReport', label: '「7つの習慣」レポート課題', pdfAllowed: true, wordAllowed: true, textAllowed: true, photoAllowed: false,
@@ -172,6 +153,33 @@ export const DOC_TYPES: DocType[] = [
       '・本は会社で用意します。お手元にない方はご連絡ください\n' +
       '・レポート用紙が足りない方は、公式LINEからダウンロードできます（文字数は自由です）\n\n' +
       'Word・PDFファイルの添付、または下の入力欄に直接テキストを入力してのご提出も可能です（写真での提出はできません）。'
+  },
+  {
+    key: 'certificate1', label: '資格証明書（1）', optional: true,
+    description:
+      '🎓 お持ちの資格・免許があれば証明書の写しを提出してください（国家整備士資格・宅地建物取引士（宅建）など）。必須ではありません。お持ちでない場合は提出不要です。最大3件まで登録できます。\n\n' +
+      '国家整備士資格をお持ちの方へ\n' +
+      '「自動車整備技能登録試験合格証書」ではなく、国土交通大臣発行の「合格証書」をご提出ください（下に見本を掲載しています）。',
+    sampleImages: [
+      { url: '/liff/samples/qualification-correct.jpg', caption: '✅ 正しい例：国土交通大臣発行の「合格証書」' },
+      { url: '/liff/samples/qualification-wrong.jpg', caption: '❌ 誤りやすい例：「自動車整備技能登録試験合格証書」はこの書類ではありません' }
+    ],
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '10', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'certificate2', label: '資格証明書（2）', optional: true,
+    description: '🎓 2件目の資格証明書（国家整備士資格・宅建など）がある場合は、こちらから提出してください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '11', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'certificate3', label: '資格証明書（3）', optional: true,
+    description: '🎓 3件目の資格証明書（国家整備士資格・宅建など）がある場合は、こちらから提出してください。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '12', jinjerRecordCode: 'auto'
+  },
+  {
+    key: 'disabilityHandbook', label: '障害者手帳の写し', optional: true,
+    description: '🪪 障害者手帳をお持ちの場合は、写しを提出してください。必須ではありません。お持ちでない場合は提出不要です。',
+    jinjerCustomMenuId: '3', jinjerCustomItemId: '22', jinjerRecordCode: 'auto'
   }
 ];
 
