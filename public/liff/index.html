@@ -680,18 +680,18 @@
       var fileSection;
       if (doc.dualFile) {
         fileSection = acceptParts.length
-          ? '<div style="margin-bottom:18px;">' +
-            '<p style="font-weight:700;margin-bottom:2px;">表面' + (doc.hasFile ? '<span class="muted">（提出済み。再提出する場合は選び直してください）</span>' : '') + '</p>' +
+          ? '<p class="muted">表面・裏面の両方を選んでから、「アップロードする」を押してください（両方選ぶまで送信できません）。</p>' +
+            '<div style="margin-bottom:14px;">' +
+            '<p style="font-weight:700;margin-bottom:2px;">表面' + (doc.hasFile ? '<span class="muted">（提出済み）</span>' : '') + '</p>' +
             '<p class="muted">' + hintText + '</p>' +
             '<input type="file" id="fileInput1" accept="' + acceptAttr + '">' +
-            '<div style="height:10px"></div><button onclick="doUpload(1)">表面をアップロードする</button>' +
             '</div>' +
             '<div>' +
-            '<p style="font-weight:700;margin-bottom:2px;">裏面' + (doc.hasFile2 ? '<span class="muted">（提出済み。再提出する場合は選び直してください）</span>' : '') + '</p>' +
+            '<p style="font-weight:700;margin-bottom:2px;">裏面' + (doc.hasFile2 ? '<span class="muted">（提出済み）</span>' : '') + '</p>' +
             '<p class="muted">' + hintText + '</p>' +
             '<input type="file" id="fileInput2" accept="' + acceptAttr + '">' +
-            '<div style="height:10px"></div><button onclick="doUpload(2)">裏面をアップロードする</button>' +
-            '</div>'
+            '</div>' +
+            '<div style="height:10px"></div><button onclick="doUpload()">アップロードする</button>'
           : '';
       } else {
         fileSection = acceptParts.length
@@ -753,22 +753,49 @@
       });
     }
 
-    function doUpload(slot) {
-      var input = document.getElementById(slot ? 'fileInput' + slot : 'fileInput');
-      var file = input.files[0];
-      if (!file) return;
+    // 1ファイル分の圧縮+送信。slotを指定するとdualFileの2枚目(裏面)として提出する
+    function submitOneFile_(file, status, slot) {
+      showOverlay();
+      status.textContent = (slot === 1 ? '表面' : slot === 2 ? '裏面' : '画像') + 'を送信中…';
+      return compressImage_(file).then(function (result) {
+        return callServer_('submitDocument', [STATE.employee.id, STATE.currentDocKey, result.base64, result.mimeType, result.ext, slot]);
+      });
+    }
+
+    // dualFileの書類(マイナンバー・運転免許証など)は、表面・裏面の両方を選んだ場合のみ
+    // まとめて1回のボタン操作で送信する(片方だけの提出は不可。両方選び直して再提出する)。
+    function doUpload() {
       var doc = STATE.docs.filter(function (d) { return d.key === STATE.currentDocKey; })[0];
-      if (doc.photoAllowed === false && file.type.indexOf('image/') === 0) {
-        document.getElementById('uploadStatus').textContent = 'この書類は写真での提出に対応していません。Word・PDFファイルを選択してください。';
+      var status = document.getElementById('uploadStatus');
+
+      if (doc.dualFile) {
+        var f1 = document.getElementById('fileInput1').files[0];
+        var f2 = document.getElementById('fileInput2').files[0];
+        if (!f1 && !f2) return;
+        if (!f1 || !f2) {
+          status.textContent = '表面・裏面の両方を選択してからアップロードしてください。';
+          return;
+        }
+        var hasBadPhoto = [f1, f2].some(function (f) { return f && doc.photoAllowed === false && f.type.indexOf('image/') === 0; });
+        if (hasBadPhoto) {
+          status.textContent = 'この書類は写真での提出に対応していません。Word・PDFファイルを選択してください。';
+          return;
+        }
+        var chain = Promise.resolve();
+        var lastResult = null;
+        if (f1) chain = chain.then(function () { return submitOneFile_(f1, status, 1); }).then(function (res) { lastResult = res; });
+        if (f2) chain = chain.then(function () { return submitOneFile_(f2, status, 2); }).then(function (res) { lastResult = res; });
+        chain.then(function () { applyPayload(lastResult); }).catch(function (err) { hideOverlay(); showError(err); });
         return;
       }
-      showOverlay();
-      document.getElementById('uploadStatus').textContent = '画像を圧縮中…';
-      compressImage_(file).then(function (result) {
-        document.getElementById('uploadStatus').textContent = 'アップロード中…';
-        callServer_('submitDocument', [STATE.employee.id, STATE.currentDocKey, result.base64, result.mimeType, result.ext, slot])
-          .then(applyPayload).catch(showError);
-      }).catch(function (err) { hideOverlay(); showError(err); });
+
+      var file = document.getElementById('fileInput').files[0];
+      if (!file) return;
+      if (doc.photoAllowed === false && file.type.indexOf('image/') === 0) {
+        status.textContent = 'この書類は写真での提出に対応していません。Word・PDFファイルを選択してください。';
+        return;
+      }
+      submitOneFile_(file, status).then(applyPayload).catch(function (err) { hideOverlay(); showError(err); });
     }
 
     function submitText() {
