@@ -3,7 +3,7 @@
 // admins テーブル(db/admins.ts)で認可判定する(GroupsApp判定は廃止)。
 
 import type { Env } from '../bindings';
-import { COMMUTES, COMPANIES, computeStage, progressPct, isApplicable, applicableDocTypes, STATUS, DocType } from '../model';
+import { COMMUTES, COMPANIES, HIRE_TYPES, computeStage, progressPct, isApplicable, applicableDocTypes, STATUS, DocType } from '../model';
 import {
   findEmployeeById,
   listEmployees,
@@ -94,6 +94,7 @@ function publicEmployee(employee: Employee) {
     company: employee.Company,
     commute: employee.Commute,
     hasLicense: employee.HasLicense || '',
+    hireType: employee.HireType || '',
     hireDate: employee.HireDate,
     pictureUrl: employee.PictureUrl || '',
     driveSavedAt: employee.DriveSavedAt || '',
@@ -131,6 +132,7 @@ export async function adminGetDashboard(env: Env, email: string, companyFilter?:
         kana: e.Kana,
         company: e.Company,
         commute: e.Commute,
+        hireType: e.HireType,
         hireDate: e.HireDate,
         pictureUrl: e.PictureUrl || '',
         stage: computeStage(e, statusMap, docTypes),
@@ -636,13 +638,15 @@ export async function settingsGet(env: Env, email: string) {
       kana: e.Kana,
       jobType: e.JobType,
       company: e.Company,
+      hireType: e.HireType || '',
       hireDate: e.HireDate,
       linked: !!e.LineUserId,
       jinjerEmployeeId: e.JinjerEmployeeId || '',
       jinjerSyncedAt: e.JinjerSyncedAt || ''
     })),
     companies: COMPANIES,
-    commutes: COMMUTES
+    commutes: COMMUTES,
+    hireTypes: HIRE_TYPES
   };
 }
 

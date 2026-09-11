@@ -3,6 +3,7 @@
 
 export const COMPANIES = ['ホンダカーズ佐賀', 'モビリティズ', 'たてものや', '佐賀バルーナーズ'] as const;
 export const COMMUTES = ['車', '自転車', '電車・バス・徒歩'] as const;
+export const HIRE_TYPES = ['新卒', '中途'] as const;
 
 // 'commute'=通勤手段で絞る(値は「車」等)。'hasLicense'=運転免許証の有無で絞る(値は「あり」固定を想定)
 export type DocCondition = { type: 'commute' | 'hasLicense'; value: string };
@@ -15,6 +16,7 @@ export type DocType = {
   sensitive?: boolean;
   condition?: DocCondition;
   companies?: string[]; // 空/未指定なら全社共通。指定した法人の内定者にのみ提出を求める
+  hireTypes?: string[]; // 空/未指定なら新卒・中途どちらも対象。指定した区分の人にのみ提出を求める(中途入社対応)
   description?: string;
   // 資格証明書のように「対象ではあるが持っていない人もいる」書類向け。未提出のままでも進捗・完了判定を止めない
   // (relevantDocTypes参照。提出した場合は通常の書類と同じく承認が必要)
@@ -134,6 +136,7 @@ export type EmployeeLike = {
   Company?: string;
   Commute?: string;
   HasLicense?: string;
+  HireType?: string;
 };
 
 export type DocStatusMap = Record<string, { status?: string }>;
@@ -146,6 +149,7 @@ export function docMeta(key: string, docTypes: DocType[] = DOC_TYPES): DocType |
 // 配属先(companies)・通勤手段・運転免許証の有無(condition)は独立した軸なので、すべての条件を満たす場合のみ対象とする。
 export function isApplicable(doc: DocType, employee: EmployeeLike): boolean {
   if (doc.companies && doc.companies.length > 0 && !doc.companies.includes(employee.Company || '')) return false;
+  if (doc.hireTypes && doc.hireTypes.length > 0 && !doc.hireTypes.includes(employee.HireType || '')) return false;
   if (doc.condition) {
     if (doc.condition.type === 'commute') return employee.Commute === doc.condition.value;
     if (doc.condition.type === 'hasLicense') return employee.HasLicense === doc.condition.value;

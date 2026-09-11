@@ -127,7 +127,7 @@
 
     // デモモード用の固定データ。DOC_TYPES(model.ts)の全ステータス・全条件パターンを一通り見せる。
     var DEMO_JOB_TYPES = ['整備士', '営業職', '事務職'];
-    var DEMO_EMPLOYEE = { id: 'DEMO0001', name: '山田 太郎', company: 'ホンダカーズ佐賀', commute: '車', hasLicense: '', hireDate: '2026-10-01' };
+    var DEMO_EMPLOYEE = { id: 'DEMO0001', name: '山田 太郎', company: 'ホンダカーズ佐賀', commute: '車', hasLicense: '', hireType: '', hireDate: '2026-10-01' };
     var DEMO_EMERGENCY_CONTACTS = [];
     var DEMO_DOCS = [
       { key: 'guarantor', label: '身元保証書', description: '内定者本人と保証人が記入する書類です。必ずボールペンで記入してください。', requiresOriginal: true, pdfAllowed: false, status: '原本提出待ち', submittedAt: '2026-08-20', rejectReason: '', rejectedAt: '' },
@@ -151,6 +151,7 @@
 
     function demoPayload() {
       var commutes = STATE.commutes.length ? STATE.commutes : ['車', '自転車', '電車・バス・徒歩'];
+      var hireTypes = STATE.hireTypes && STATE.hireTypes.length ? STATE.hireTypes : ['新卒', '中途'];
       var applicable = DEMO_DOCS.filter(function (d) { return d.status !== '対象外'; });
       var optionalKeys = ['certificate1', 'certificate2', 'certificate3', 'disabilityHandbook'];
       var relevant = applicable.filter(function (d) { return optionalKeys.indexOf(d.key) === -1 || d.status !== '未提出'; });
@@ -159,7 +160,8 @@
         ok: true, matched: true, needsCommute: false,
         needsEmergencyContact: !DEMO_EMERGENCY_CONTACTS.length,
         needsLicenseAnswer: !DEMO_EMPLOYEE.hasLicense,
-        employee: DEMO_EMPLOYEE, companies: [], commutes: commutes,
+        needsHireType: !DEMO_EMPLOYEE.hireType,
+        employee: DEMO_EMPLOYEE, companies: [], commutes: commutes, hireTypes: hireTypes,
         emergencyContacts: DEMO_EMERGENCY_CONTACTS,
         docs: DEMO_DOCS, progressPct: relevant.length ? Math.round((done / relevant.length) * 100) : 100,
         stage: '確認中'
@@ -172,10 +174,11 @@
       return new Promise(function (resolve) { setTimeout(resolve, 350); }).then(function () {
         hideOverlay();
         if (fn === 'findByKana') return { employeeId: DEMO_EMPLOYEE.id, name: DEMO_EMPLOYEE.name, kana: 'ヤマダ タロウ', jobType: DEMO_JOB_TYPES[0], company: DEMO_EMPLOYEE.company };
-        if (fn === 'confirmBind') return { ok: true, matched: true, needsCommute: true, employee: DEMO_EMPLOYEE, companies: [], commutes: ['車', '自転車', '電車・バス・徒歩'], docs: [], progressPct: 0, stage: '未提出' };
+        if (fn === 'confirmBind') return { ok: true, matched: true, needsCommute: true, needsHireType: true, employee: DEMO_EMPLOYEE, companies: [], commutes: ['車', '自転車', '電車・バス・徒歩'], hireTypes: ['新卒', '中途'], docs: [], progressPct: 0, stage: '未提出' };
         if (fn === 'saveProfile') {
           DEMO_EMPLOYEE.commute = args[2];
           DEMO_EMPLOYEE.hasLicense = args[3];
+          DEMO_EMPLOYEE.hireType = args[4];
           var frontBack = ['licenseFront', 'licenseBack'];
           DEMO_DOCS.forEach(function (d) {
             if (frontBack.indexOf(d.key) !== -1) d.status = args[3] === 'あり' ? '未提出' : '対象外';
@@ -215,7 +218,7 @@
       });
     }
 
-    var STATE = { employee: null, docs: [], currentDocKey: null, lineUserId: null, displayName: '', pictureUrl: '', companies: [], commutes: [] };
+    var STATE = { employee: null, docs: [], currentDocKey: null, lineUserId: null, displayName: '', pictureUrl: '', companies: [], commutes: [], hireTypes: [] };
 
     var BOOT_WATCHDOG_ = null;
     function render(html) {
@@ -296,6 +299,10 @@
         return '<option value="' + v + '"' + (v === e.commute ? ' selected' : '') + '>' + v + '</option>';
       }).join('');
       var lic = e.hasLicense || '';
+      var ht = e.hireType || '';
+      var hireTypeButtons = STATE.hireTypes.map(function (v) {
+        return '<button type="button" onclick="selectHireTypeOption_(\'' + v + '\')" data-hiretype-btn="' + v + '" class="' + (ht === v ? '' : 'ghost') + '" style="width:auto;padding:8px 16px;margin-right:8px;">' + v + '</button>';
+      }).join('');
       render(
         '<div class="card"><h2>' + (e.name || '') + 'さん、いくつか質問にお答えください</h2>' +
         '<p class="muted">回答内容によって、提出していただく書類が決まります。</p>' +
@@ -307,6 +314,9 @@
         '<button type="button" onclick="selectLicenseOption_(\'なし\')" data-license-btn="なし" class="' + (lic === 'なし' ? '' : 'ghost') + '" style="width:auto;padding:8px 16px;">なし</button>' +
         '</div>' +
         '<input type="hidden" id="cfHasLicense" value="' + lic + '">' +
+        '<label class="muted">区分（新卒／中途）</label>' +
+        '<div id="cfHireTypeButtons" style="margin:4px 0 12px;">' + hireTypeButtons + '</div>' +
+        '<input type="hidden" id="cfHireType" value="' + ht + '">' +
         '<button onclick="saveCommute()">この内容で進む</button>' +
         '<p id="cfStatus" class="muted" style="margin-top:8px;"></p></div>'
       );
@@ -319,14 +329,23 @@
       });
     }
 
+    function selectHireTypeOption_(value) {
+      document.getElementById('cfHireType').value = value;
+      document.querySelectorAll('#cfHireTypeButtons button').forEach(function (b) {
+        b.className = (b.getAttribute('data-hiretype-btn') === value) ? '' : 'ghost';
+      });
+    }
+
     function saveCommute() {
       var commute = document.getElementById('cfCommute').value;
       var hasLicense = document.getElementById('cfHasLicense').value;
+      var hireType = document.getElementById('cfHireType').value;
       var st = document.getElementById('cfStatus');
       if (!commute) { st.textContent = '通勤手段を選択してください'; return; }
       if (!hasLicense) { st.textContent = '運転免許証の有無を選択してください'; return; }
+      if (!hireType) { st.textContent = '区分（新卒／中途）を選択してください'; return; }
       st.textContent = '保存中…';
-      callServer_('saveProfile', [STATE.employee.id, STATE.lineUserId, commute, hasLicense]).then(function (res) {
+      callServer_('saveProfile', [STATE.employee.id, STATE.lineUserId, commute, hasLicense, hireType]).then(function (res) {
         applyPayload(res);
       }).catch(showError);
     }
@@ -337,10 +356,12 @@
       STATE.docs = res.docs || [];
       STATE.companies = res.companies || STATE.companies;
       STATE.commutes = res.commutes || STATE.commutes;
+      STATE.hireTypes = res.hireTypes || STATE.hireTypes;
       STATE.emergencyContacts = res.emergencyContacts || [];
       STATE.needsEmergencyContact = !!res.needsEmergencyContact;
       STATE.needsLicenseAnswer = !!res.needsLicenseAnswer;
-      if (res.needsCommute || res.needsLicenseAnswer) { renderCommuteForm(res); return; }
+      STATE.needsHireType = !!res.needsHireType;
+      if (res.needsCommute || res.needsLicenseAnswer || res.needsHireType) { renderCommuteForm(res); return; }
       renderList(res);
     }
 
@@ -610,9 +631,10 @@
       render(
         '<div class="card"><h2>ようこそ、' + e.name + 'さん</h2>' +
         '<p class="muted">' + e.company + '・進捗 ' + res.progressPct + '%</p></div>' +
-        '<div class="card"><h2>通勤手段・運転免許証の確認</h2>' +
+        '<div class="card"><h2>通勤手段・運転免許証・区分の確認</h2>' +
         '<div class="doc-row"><span>通勤手段: ' + e.commute + '</span></div>' +
         '<div class="doc-row"><span>運転免許証: ' + e.hasLicense + '</span></div>' +
+        '<div class="doc-row"><span>区分: ' + (e.hireType || '') + '</span></div>' +
         '<button class="ghost" style="width:auto;padding:6px 14px;font-size:.8rem;margin-top:6px;" onclick="renderCommuteForm({employee: STATE.employee}); return false;">変更する</button></div>' +
         '<div class="card">' + rows + '</div>' +
         rejectedHtml +

@@ -1,7 +1,7 @@
 // gas-app-liff/Api.gs の移植。関数名・挙動は極力そのまま揃える。
 
 import type { Env } from '../bindings';
-import { COMMUTES, computeStage, progressPct, isApplicable, STATUS, DocType } from '../model';
+import { COMMUTES, HIRE_TYPES, computeStage, progressPct, isApplicable, STATUS, DocType } from '../model';
 import { findEmployeeById, findEmployeeByLineUserId, findUnlinkedEmployeesByKana, normalizeKana, saveEmployee, Employee } from '../db/employees';
 import { getJobTypeCompanyMap } from '../db/jobTypeMap';
 import { getSubmissionsMap, upsertSubmission } from '../db/submissions';
@@ -22,6 +22,7 @@ function publicEmployee(employee: Employee) {
     company: employee.Company || '',
     commute: employee.Commute || '',
     hasLicense: employee.HasLicense || '',
+    hireType: employee.HireType || '',
     hireDate: employee.HireDate || ''
   };
 }
@@ -33,19 +34,22 @@ function subsToStatusMap(subs: Record<string, { Status: string }>) {
 }
 
 async function buildDocumentsPayload(db: D1Database, employee: Employee) {
-  // 配属先(Company)は職種法人マスタから自動決定されるため、ここでは通勤手段・運転免許証の有無の
-  // 未回答だけを見る。運転免許証の有無は通勤手段に関係なく全員必須の質問のため、どちらか一方でも
+  // 配属先(Company)は職種法人マスタから自動決定されるため、ここでは通勤手段・運転免許証の有無・区分の
+  // 未回答だけを見る。運転免許証の有無・区分は通勤手段に関係なく全員必須の質問のため、いずれか1つでも
   // 未回答なら通勤手段と同じ扱いで書類一覧をブロックする(1つの質問フォームでまとめて回答してもらう)。
   const needsCommute = !employee.Commute;
   const needsLicenseAnswer = !employee.HasLicense;
+  const needsHireType = !employee.HireType;
   const base: any = {
     employee: publicEmployee(employee),
     needsCommute,
     needsLicenseAnswer,
+    needsHireType,
     companies: [], // COMPANIESはconditionのcompany判定にのみ使う内部値。画面はJobType経由なのでここでは空でよい
-    commutes: COMMUTES
+    commutes: COMMUTES,
+    hireTypes: HIRE_TYPES
   };
-  if (needsCommute || needsLicenseAnswer) {
+  if (needsCommute || needsLicenseAnswer || needsHireType) {
     base.docs = [];
     base.progressPct = 0;
     base.stage = '未提出';
@@ -164,9 +168,16 @@ export async function confirmBind(env: Env, employeeId: string, kana: string, li
   return payload;
 }
 
-// 通勤手段・運転免許証の有無をまとめて回答する。運転免許証の有無は通勤手段に関係なく全員必須のため、
+// 通勤手段・運転免許証の有無・区分(新卒/中途)をまとめて回答する。いずれも通勤手段に関係なく全員必須のため、
 // 通勤手段と同じ1つの質問フォームでまとめて答えてもらう(buildDocumentsPayloadのブロック条件と対応)。
-export async function saveProfile(env: Env, eid: string, lineUserId: string, commute: string, hasLicense: string) {
+export async function saveProfile(
+  env: Env,
+  eid: string,
+  lineUserId: string,
+  commute: string,
+  hasLicense: string,
+  hireType: string
+) {
   const employee = await findEmployeeById(env.DB, eid);
   if (!employee) throw new ApiError('新入社員情報が見つかりません');
   if (!employee.LineUserId || employee.LineUserId !== lineUserId) {
@@ -174,11 +185,20 @@ export async function saveProfile(env: Env, eid: string, lineUserId: string, com
   }
   if (!(COMMUTES as readonly string[]).includes(commute)) throw new ApiError('通勤手段を選択してください');
   if (hasLicense !== 'あり' && hasLicense !== 'なし') throw new ApiError('運転免許証の有無を選択してください');
+  if (!(HIRE_TYPES as readonly string[]).includes(hireType)) throw new ApiError('区分（新卒／中途）を選択してください');
 
   employee.Commute = commute;
   employee.HasLicense = hasLicense;
+  employee.HireType = hireType;
   await saveEmployee(env.DB, employee);
-  await appendHistory(env.DB, eid, '', '通勤手段・運転免許証回答', `通勤手段: ${commute} / 運転免許証: ${hasLicense}`, '');
+  await appendHistory(
+    env.DB,
+    eid,
+    '',
+    '通勤手段・運転免許証・区分回答',
+    `通勤手段: ${commute} / 運転免許証: ${hasLicense} / 区分: ${hireType}`,
+    ''
+  );
 
   const payload = await buildDocumentsPayload(env.DB, employee);
   payload.ok = true;

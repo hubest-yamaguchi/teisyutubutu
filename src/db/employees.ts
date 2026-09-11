@@ -7,6 +7,7 @@ export type Employee = {
   Company: string;
   Commute: string;
   HasLicense?: string;
+  HireType?: string;
   HireDate: string;
   JobType: string;
   LineUserId: string;
@@ -14,6 +15,7 @@ export type Employee = {
   DriveSavedAt?: string;
   JinjerEmployeeId?: string;
   JinjerSyncedAt?: string;
+  EmergencyContactsSyncedAt?: string;
 };
 
 export async function findEmployeeById(db: D1Database, employeeId: string): Promise<Employee | null> {
@@ -45,11 +47,11 @@ export async function findUnlinkedEmployeesByKana(db: D1Database, kana: string):
 export async function saveEmployee(db: D1Database, employee: Employee): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO employees (EmployeeId, Name, Kana, Company, Commute, HasLicense, HireDate, JobType, LineUserId, PictureUrl)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO employees (EmployeeId, Name, Kana, Company, Commute, HasLicense, HireType, HireDate, JobType, LineUserId, PictureUrl)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(EmployeeId) DO UPDATE SET
          Name=excluded.Name, Kana=excluded.Kana, Company=excluded.Company, Commute=excluded.Commute,
-         HasLicense=excluded.HasLicense, HireDate=excluded.HireDate, JobType=excluded.JobType,
+         HasLicense=excluded.HasLicense, HireType=excluded.HireType, HireDate=excluded.HireDate, JobType=excluded.JobType,
          LineUserId=excluded.LineUserId, PictureUrl=excluded.PictureUrl`
     )
     .bind(
@@ -59,6 +61,7 @@ export async function saveEmployee(db: D1Database, employee: Employee): Promise<
       employee.Company ?? '',
       employee.Commute ?? '',
       employee.HasLicense ?? '',
+      employee.HireType ?? '',
       employee.HireDate ?? '',
       employee.JobType ?? '',
       employee.LineUserId ?? '',

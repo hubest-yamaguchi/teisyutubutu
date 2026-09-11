@@ -26,6 +26,7 @@ type DocConfigRow = {
   Description: string;
   SortOrder: number;
   CompaniesJson: string;
+  HireTypesJson: string;
   JinjerCustomMenuId: string;
   JinjerCustomItemId: string;
   JinjerRecordCode: string;
@@ -44,6 +45,12 @@ export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
     } catch {
       companies = [];
     }
+    let hireTypes: string[] = [];
+    try {
+      hireTypes = JSON.parse(r.HireTypesJson || '[]');
+    } catch {
+      hireTypes = [];
+    }
     const d: DocType = {
       key: String(r.DocKey).trim(),
       label: r.Label,
@@ -52,6 +59,7 @@ export async function loadDocTypes(db: D1Database): Promise<DocType[]> {
       sensitive: !!r.Sensitive,
       description: r.Description || '',
       companies,
+      hireTypes,
       optional: !!r.Optional,
       jinjerCustomMenuId: r.JinjerCustomMenuId || '',
       jinjerCustomItemId: r.JinjerCustomItemId || '',
@@ -72,8 +80,8 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
 
   const stmt = db.prepare(
     `INSERT INTO company_document_config
-      (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   await db.batch(
     DOC_TYPES.map((d, i) =>
@@ -88,6 +96,7 @@ export async function seedCompanyDocumentConfigIfEmpty(db: D1Database): Promise<
         d.description ?? '',
         i,
         JSON.stringify(d.companies ?? []),
+        JSON.stringify(d.hireTypes ?? []),
         d.jinjerCustomMenuId ?? '',
         d.jinjerCustomItemId ?? '',
         d.jinjerRecordCode ?? '',
@@ -101,12 +110,13 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
   await db
     .prepare(
       `INSERT INTO company_document_config
-        (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (DocKey, Label, RequiresOriginal, PdfAllowed, ConditionType, ConditionValue, Sensitive, Description, SortOrder, CompaniesJson, HireTypesJson, JinjerCustomMenuId, JinjerCustomItemId, JinjerRecordCode, Optional)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(DocKey) DO UPDATE SET
          Label=excluded.Label, RequiresOriginal=excluded.RequiresOriginal, PdfAllowed=excluded.PdfAllowed,
          ConditionType=excluded.ConditionType, ConditionValue=excluded.ConditionValue, Sensitive=excluded.Sensitive,
          Description=excluded.Description, SortOrder=excluded.SortOrder, CompaniesJson=excluded.CompaniesJson,
+         HireTypesJson=excluded.HireTypesJson,
          JinjerCustomMenuId=excluded.JinjerCustomMenuId, JinjerCustomItemId=excluded.JinjerCustomItemId,
          JinjerRecordCode=excluded.JinjerRecordCode, Optional=excluded.Optional`
     )
@@ -121,6 +131,7 @@ export async function upsertDocConfig(db: D1Database, doc: DocType, sortOrder: n
       doc.description ?? '',
       sortOrder,
       JSON.stringify(doc.companies ?? []),
+      JSON.stringify(doc.hireTypes ?? []),
       doc.jinjerCustomMenuId ?? '',
       doc.jinjerCustomItemId ?? '',
       doc.jinjerRecordCode ?? '',

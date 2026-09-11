@@ -20,6 +20,18 @@ describe('isApplicable', () => {
     expect(isApplicable(doc, { ...baseEmployee, Company: '佐賀バルーナーズ' })).toBe(true);
     expect(isApplicable(doc, { ...baseEmployee, Company: 'モビリティズ' })).toBe(false);
   });
+
+  it('対象区分は一致した区分だけ対象(新卒のみ指定した書類は中途は対象外)', () => {
+    const doc = { key: 'graduationCert', label: '卒業証明書', hireTypes: ['新卒'] };
+    expect(isApplicable(doc, { ...baseEmployee, HireType: '新卒' })).toBe(true);
+    expect(isApplicable(doc, { ...baseEmployee, HireType: '中途' })).toBe(false);
+  });
+
+  it('対象区分を指定していない書類は新卒・中途どちらも対象', () => {
+    const doc = DOC_TYPES.find((d) => d.key === 'bank')!;
+    expect(isApplicable(doc, { ...baseEmployee, HireType: '新卒' })).toBe(true);
+    expect(isApplicable(doc, { ...baseEmployee, HireType: '中途' })).toBe(true);
+  });
 });
 
 describe('computeStage', () => {
