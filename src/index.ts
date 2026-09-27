@@ -78,6 +78,7 @@ const LIFF_FUNCTIONS: Record<string, (env: Env, ...args: any[]) => Promise<unkno
   getMyDocuments: liffApi.getMyDocuments,
   submitDocument: liffApi.submitDocument,
   submitDocumentText: liffApi.submitDocumentText,
+  getTextSubmissionForPrint: liffApi.getTextSubmissionForPrint,
   getMyStatusByLine: liffApi.getMyStatusByLine
 };
 
@@ -156,6 +157,7 @@ const ADMIN_FUNCTIONS: Record<string, (env: Env, email: string, ...args: any[]) 
   adminGetDashboard: adminApi.adminGetDashboard,
   adminGetEmployeeDetail: adminApi.adminGetEmployeeDetail,
   adminApproveDoc: adminApi.adminApproveDoc,
+  adminGetTextSubmissionForPrint: adminApi.adminGetTextSubmissionForPrint,
   adminUnapproveDoc: adminApi.adminUnapproveDoc,
   adminRejectDocsBatch: adminApi.adminRejectDocsBatch,
   adminToggleOriginalReceived: adminApi.adminToggleOriginalReceived,

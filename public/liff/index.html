@@ -67,6 +67,7 @@
     .st-承認済 { background:#E9F5EA; color:#3F9142; }
     .st-原本提出待ち { background:#FBF0DD; color:#C4881B; }
     .st-対象外 { background:transparent; color:#AAB2AE; border:1px dashed #C4CCC9; }
+    .badge-req { display:inline-flex; align-items:center; font-size:.68rem; font-weight:700; padding:2px 7px; border-radius:999px; background:#FBF0DD; color:#C4881B; margin-left:4px; }
     .doc-row { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid #EEF0F1; cursor:pointer; }
     .doc-row.na { opacity:.5; cursor:default; }
     .doc-row:last-child { border-bottom:none; }
@@ -617,13 +618,18 @@
         }
         var clickable = (d.status === '未提出' || d.status === '差し戻し');
         var optionalBadge = d.optional ? ' <span class="muted" style="font-size:.72rem;">（任意）</span>' : '';
+        var reqBadge = d.requiresOriginal ? ' <span class="badge-req">原本必須</span>' : '';
         var statusHtml = d.status === '原本提出待ち'
           ? '<span class="pill st-承認済">承認済</span> <span style="color:#C1443A;font-weight:700;font-size:.72rem;margin-left:4px;">原本提出待ち</span>'
           : '<span class="pill st-' + d.status + '">' + d.status + '</span>';
         rows += '<div class="doc-row" onclick="' + (clickable ? "openDoc('" + d.key + "')" : '') + '">' +
-          '<span>' + d.label + (d.requiresOriginal ? '（原本）' : '') + optionalBadge + '</span>' +
+          '<span>' + d.label + reqBadge + optionalBadge + '</span>' +
           statusHtml + '</div>';
       });
+      var hasOriginalDocs = res.docs.some(function (d) { return d.requiresOriginal && d.status !== '対象外'; });
+      var originalNoteHtml = hasOriginalDocs
+        ? '<div class="muted" style="padding:10px 2px 4px;font-size:.78rem;border-top:1px dashed #DBE1DF;margin-top:6px;">📮 「原本必須」の書類は、まずは写真やデータでご提出ください。内容を確認後、原本の郵送・提出方法をご案内します。</div>'
+        : '';
 
       var rejected = res.docs.filter(function (d) { return d.status === '差し戻し'; });
       var rejectedHtml = rejected.map(function (d) {
@@ -639,7 +645,7 @@
         '<div class="doc-row"><span>運転免許証: ' + e.hasLicense + '</span></div>' +
         '<div class="doc-row"><span>区分: ' + (e.hireType || '') + '</span></div>' +
         '<button class="ghost" style="width:auto;padding:6px 14px;font-size:.8rem;margin-top:6px;" onclick="renderCommuteForm({employee: STATE.employee}); return false;">変更する</button></div>' +
-        '<div class="card">' + rows + '</div>' +
+        '<div class="card">' + rows + originalNoteHtml + '</div>' +
         rejectedHtml +
         '<div id="uploadArea"></div>' +
         renderEcSection_()
@@ -660,6 +666,14 @@
 
     var WORD_MIME_TYPES_ = ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
 
+    // 誓約保証書は配属先の法人ごとに様式が異なるため、本人の配属先に対応する様式だけをダウンロードできるようにする
+    var GUARANTOR_TEMPLATES_ = {
+      'ホンダカーズ佐賀': '/liff/templates/guarantor_honda.docx',
+      'モビリティズ': '/liff/templates/guarantor_mobility.docx',
+      'たてものや': '/liff/templates/guarantor_tatemonoya.docx',
+      '佐賀バルーナーズ': '/liff/templates/guarantor_saga_balloonerz.docx'
+    };
+
     function isWordFile_(file) {
       return WORD_MIME_TYPES_.indexOf(file.type) !== -1 || /\.docx?$/i.test(file.name || '');
     }
@@ -667,6 +681,10 @@
     function openDoc(key) {
       STATE.currentDocKey = key;
       var doc = STATE.docs.filter(function (d) { return d.key === key; })[0];
+      var templateUrl = key === 'guarantor' ? GUARANTOR_TEMPLATES_[STATE.employee.company] : null;
+      var templateHtml = templateUrl
+        ? '<p><a href="' + escAttr_(templateUrl) + '" target="_blank" rel="noopener" style="display:inline-block;background:#E4F1EE;color:#16867C;border-radius:10px;padding:10px 16px;font-size:.85rem;font-weight:700;text-decoration:none;">📄 配属先の様式をダウンロードする</a></p>'
+        : '';
       var acceptParts = [];
       var hints = [];
       if (doc.photoAllowed !== false) { acceptParts.push('image/*'); hints.push('写真'); }
@@ -692,17 +710,39 @@
             '<div style="height:10px"></div><button onclick="doUpload()">アップロードする</button>'
           : '';
       } else {
+        // Word・PDFでの提出は、本人が名前・所属法人を書類自体に記入したか確認するチェックを
+        // 入れないとボタンを押せないようにする(ファイルの中身までは検証できないため、本人への注意喚起)
+        var needsNameConfirm = key === 'sevenHabitsReport' && (doc.wordAllowed || doc.pdfAllowed);
+        var nameConfirmHtml = needsNameConfirm
+          ? '<label class="check" style="display:flex;align-items:flex-start;gap:8px;margin:10px 0;font-size:.85rem;">' +
+            '<input type="checkbox" id="nameConfirmCheck" style="width:auto;margin-top:3px;" onchange="document.getElementById(\'uploadBtnMain\').disabled = !this.checked;">' +
+            '<span>レポートに名前・所属法人を記入したことを確認しました</span></label>'
+          : '';
         fileSection = acceptParts.length
           ? '<p class="muted">' + hintText + '</p>' +
             '<input type="file" id="fileInput" accept="' + acceptAttr + '">' +
-            '<div style="height:10px"></div><button onclick="doUpload()">アップロードする</button>'
+            nameConfirmHtml +
+            '<div style="height:10px"></div><button id="uploadBtnMain" onclick="doUpload()"' + (needsNameConfirm ? ' disabled' : '') + '>アップロードする</button>'
           : '';
       }
+      var textMetaHtml = doc.textAllowed
+        ? '<div class="muted" style="background:#F6F8F7;border:1px solid #DBE1DF;border-radius:8px;padding:10px;margin-bottom:10px;">' +
+          '以下は自動的に記録されます(本文に重ねて記入する必要はありません)' +
+          '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px;">' +
+          '<div><span style="font-size:.72rem;">所属法人</span><br><b style="color:#1D2321;">' + escHtml_(STATE.employee.company || '') + '</b></div>' +
+          '<div><span style="font-size:.72rem;">氏名</span><br><b style="color:#1D2321;">' + escHtml_(STATE.employee.name || '') + '</b></div>' +
+          '</div></div>'
+        : '';
+      var printLinkHtml = (doc.textAllowed && doc.textContent)
+        ? '<p style="margin-top:10px;"><a href="/print-report?role=liff&eid=' + escAttr_(STATE.employee.id) + '&docKey=' + escAttr_(doc.key) + '" target="_blank" rel="noopener" style="display:inline-block;background:#E4F1EE;color:#16867C;border-radius:10px;padding:10px 16px;font-size:.85rem;font-weight:700;text-decoration:none;">🖨️ 提出内容を印刷・PDF保存する</a></p>'
+        : '';
       var textSection = doc.textAllowed
         ? '<div style="' + (fileSection ? 'margin-top:16px;padding-top:16px;border-top:1px solid #EEF0F1;' : '') + '">' +
           '<p class="muted">' + (fileSection ? '── またはテキストを直接入力して提出 ──' : 'テキストを直接入力して提出してください') + '</p>' +
+          textMetaHtml +
           '<textarea id="textInput" rows="8" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #DBE1DF;border-radius:8px;font-size:.9rem;" placeholder="ここに直接入力してください">' + escHtml_(doc.textContent || '') + '</textarea>' +
           '<div style="height:10px"></div><button onclick="submitText()">テキストで提出する</button>' +
+          printLinkHtml +
           '</div>'
         : '';
       var samplesHtml = (doc.sampleImages || []).map(function (si) {
@@ -714,6 +754,7 @@
       document.getElementById('uploadArea').innerHTML =
         '<div class="card"><h2>' + doc.label + 'の提出</h2>' +
         (doc.description ? '<p class="muted" style="white-space:pre-wrap;">' + escHtml_(doc.description) + '</p>' : '') +
+        templateHtml +
         samplesHtml +
         fileSection +
         textSection +

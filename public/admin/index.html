@@ -106,6 +106,7 @@
     .badge.on { background:#E9F5EA; color:#3F9142; }
     .badge.warn { background:#FBEAE8; color:#C1443A; }
     .badge.optional { background:#FBF0DD; color:#C4881B; }
+    .badge.req { background:#FBF0DD; color:#C4881B; }
     @media (max-width:620px) {
       .doctbl td.dstatus { width:auto; }
     }
@@ -607,7 +608,8 @@
         var reasonHtml = d.status === '差し戻し' ? '<div class="muted" style="color:#C1443A;">' + d.rejectReason + '</div>' : '';
         var metaHtml = d.submittedAt ? '<div class="muted" style="margin-top:4px;">提出日時: ' + d.submittedAt + '</div>' : '';
         var textHtml = d.textContent
-          ? '<div class="muted" style="margin-top:6px;white-space:pre-wrap;border:1px solid #EEF0F1;border-radius:6px;padding:8px;background:#fff;">' + escHtml_(d.textContent) + '</div>'
+          ? '<div class="muted" style="margin-top:6px;white-space:pre-wrap;border:1px solid #EEF0F1;border-radius:6px;padding:8px;background:#fff;">' + escHtml_(d.textContent) + '</div>' +
+            '<a href="/print-report?role=admin&eid=' + escAttr(e.id) + '&docKey=' + escAttr(d.key) + '" target="_blank" rel="noopener" class="btn ghost" style="display:inline-block;text-decoration:none;margin-top:6px;">🖨️ 印刷・PDF保存用ページを開く</a>'
           : '';
         var batchArea = canReject
           ? '<div id="batchArea-' + d.key + '" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid #EEF0F1;">' +
@@ -623,7 +625,7 @@
 
         var mainRow = '<tr class="' + (na ? 'na' : '') + '">' +
           '<td class="dtgt">' + checkboxHtml + '</td>' +
-          '<td class="dname"><b>' + d.label + (d.requiresOriginal ? '（原本）' : '') + '</b></td>' +
+          '<td class="dname"><b>' + d.label + '</b>' + (d.requiresOriginal ? ' <span class="badge req">原本必須</span>' : '') + '</td>' +
           '<td class="dstatus">' + statusPillHtml_(d) + '</td>' +
           '<td class="dact">' + expandBtn + '</td>' +
           '</tr>';

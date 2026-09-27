@@ -315,4 +315,22 @@ export async function submitDocumentText(env: Env, eid: string, docKey: string, 
   return payload;
 }
 
+// テキスト提出された内容を、ブラウザの印刷機能でPDF保存できるよう印刷用ページに渡すためのデータ取得
+export async function getTextSubmissionForPrint(env: Env, eid: string, docKey: string) {
+  const employee = await findEmployeeById(env.DB, eid);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  const docTypes = await loadDocTypes(env.DB);
+  const meta = docTypes.find((d) => d.key === docKey);
+  if (!meta) throw new ApiError(`不明な書類種別です: ${docKey}`);
+  const sub = (await getSubmissionsMap(env.DB, eid))[docKey];
+  if (!sub || !sub.TextContent) throw new ApiError('テキストで提出された内容が見つかりません');
+  return {
+    label: meta.label,
+    company: employee.Company || '',
+    name: employee.Name || '',
+    submittedAt: sub.SubmittedAt || '',
+    textContent: sub.TextContent
+  };
+}
+
 export { ApiError };
