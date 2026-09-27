@@ -229,11 +229,29 @@ app.get('/api/admin/file', async (c) => {
 // 社員の提出済み書類をまとめてZIPでダウンロードする。
 // 対象範囲は adminGetEmployeeDetail の hasFile === true な書類(マイナンバー等、閲覧権限が
 // 無い管理者には最初から見えない書類は含まれない)と揃えている。
+// 一括ZIPダウンロードで抱え込むファイル合計サイズの上限。全ファイルを一度にメモリへ載せてから
+// 圧縮する実装のため、上限を超える場合はWorkerのメモリ・CPU時間の制限に達するリスクを避け、
+// 個別ダウンロードを案内する(合計サイズはR2のhead()で軽量に確認してから、実際の中身を読みに行く)。
+const ZIP_TOTAL_SIZE_LIMIT_BYTES = 40 * 1024 * 1024;
+
 app.get('/api/admin/files.zip', async (c) => {
   const email = c.get('adminEmail');
   const employeeId = c.req.query('employeeId') || '';
   try {
     const manifest = await adminApi.adminGetZipManifest(c.env, email, employeeId);
+
+    let totalSize = 0;
+    for (const f of manifest.files) {
+      const head = await c.env.DOCS.head(f.key);
+      if (head) totalSize += head.size;
+    }
+    if (totalSize > ZIP_TOTAL_SIZE_LIMIT_BYTES) {
+      return c.json(
+        { ok: false, error: '書類の合計サイズが大きすぎるため、ZIPでの一括ダウンロードはできません。書類ごとに個別でダウンロードしてください。' },
+        413
+      );
+    }
+
     const zipInput: Record<string, Uint8Array> = {};
     for (const f of manifest.files) {
       const obj = await getEmployeeFile(c.env.DOCS, f.key);
@@ -293,39 +311,46 @@ app.post('/api/line/webhook', async (c) => {
 
   const token = await getSetting(c.env.DB, SETTINGS_KEYS.LINE_CHANNEL_ACCESS_TOKEN);
 
+  // 1件のイベント処理で例外が起きても、他のイベントの処理を止めないようにする(1件だけ失敗として
+  // ログに残し、次のイベントへ進む)。ここで全体を止めてしまうと、LINEの再送時に同じ箇所で毎回失敗し、
+  // それ以降のイベントがずっと処理されない状態になり得るため。
   for (const event of body.events || []) {
-    if (event.type !== 'message') continue;
-    const lineUserId = event.source?.userId;
-    const message = event.message;
-    if (!lineUserId || !message) continue;
+    try {
+      if (event.type !== 'message') continue;
+      const lineUserId = event.source?.userId;
+      const message = event.message;
+      if (!lineUserId || !message) continue;
 
-    const employee = await findEmployeeByLineUserId(c.env.DB, lineUserId);
-    if (!employee) continue;
+      const employee = await findEmployeeByLineUserId(c.env.DB, lineUserId);
+      if (!employee) continue;
 
-    if (message.type === 'text') {
-      await insertInboundMessage(c.env.DB, {
-        employeeId: employee.EmployeeId,
-        messageType: 'text',
-        text: String(message.text || ''),
-        storageKey: '',
-        mimeType: '',
-        lineMessageId: String(message.id || '')
-      });
-    } else if (message.type === 'image' && token) {
-      const content = await fetchLineMessageContent(token, message.id);
-      if (content) {
-        const ext = content.mimeType.includes('png') ? 'png' : 'jpg';
-        const key = `line-images/${employee.EmployeeId}/${message.id}.${ext}`;
-        await c.env.DOCS.put(key, content.bytes, { httpMetadata: { contentType: content.mimeType } });
+      if (message.type === 'text') {
         await insertInboundMessage(c.env.DB, {
           employeeId: employee.EmployeeId,
-          messageType: 'image',
-          text: '',
-          storageKey: key,
-          mimeType: content.mimeType,
+          messageType: 'text',
+          text: String(message.text || ''),
+          storageKey: '',
+          mimeType: '',
           lineMessageId: String(message.id || '')
         });
+      } else if (message.type === 'image' && token) {
+        const content = await fetchLineMessageContent(token, message.id);
+        if (content) {
+          const ext = content.mimeType.includes('png') ? 'png' : 'jpg';
+          const key = `line-images/${employee.EmployeeId}/${message.id}.${ext}`;
+          await c.env.DOCS.put(key, content.bytes, { httpMetadata: { contentType: content.mimeType } });
+          await insertInboundMessage(c.env.DB, {
+            employeeId: employee.EmployeeId,
+            messageType: 'image',
+            text: '',
+            storageKey: key,
+            mimeType: content.mimeType,
+            lineMessageId: String(message.id || '')
+          });
+        }
       }
+    } catch (err) {
+      console.log(`LINE webhookイベントの処理に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

@@ -20,6 +20,7 @@ import {
 } from '../db/employees';
 import { getSubmissionsMap, getAllSubmissions, upsertSubmission, markJinjerSent } from '../db/submissions';
 import { listEmergencyContacts } from '../db/emergencyContacts';
+import { contactFingerprint, getSyncedContactFingerprints, markContactSynced } from '../db/jinjerContactSync';
 import { appendHistory } from '../db/history';
 import { loadDocTypes, seedCompanyDocumentConfigIfEmpty, upsertDocConfig, removeDocConfig } from '../db/docConfig';
 import { getJobTypeCompanyMap, setJobTypeCompany, removeJobType } from '../db/jobTypeMap';
@@ -504,8 +505,11 @@ export async function adminSyncJinjerMunicipalities(env: Env, email: string) {
 //   いない(src/jinjer.tsのupsertEmployeeMaster参照)。社員はjinjer側で登録済みの前提のため、素性不明な
 //   "登録"系APIを本番の既存社員に対して呼ぶリスクを避け、現時点では呼び出さない(動作確認が取れ次第対応する)
 // - jinjerの緊急連絡先の登録APIは「登録」専用で、同じ人に何度送っても新規追加されてしまい、更新・上書きの
-//   手段が無いことを確認済み(src/jinjer.ts先頭のコメント参照)。そのため、employee.JinjerSyncedAtが
-//   未設定(＝このボタンを押すのが初めて)の場合にのみ送信する(重複登録の防止)
+//   手段が無いことを確認済み(src/jinjer.ts先頭のコメント参照)。そのため、連絡先の内容ごとに送信済みかどうかを
+//   jinjer_synced_contactsで記録し(EmployeeId, 連絡先の内容から作ったフィンガープリント)、既に送信済みの
+//   連絡先はスキップする。こうすることで、複数件の送信中に一部が失敗しても、再実行時に送信済みの分まで
+//   重複登録されることを防げる(以前はemployee.JinjerSyncedAtの有無だけで全件ブロックしていたため、
+//   一部失敗後の再実行で成功済みの分まで再送され、jinjer側に重複登録される不具合があった)
 export async function adminSyncToJinjer(env: Env, email: string, employeeId: string) {
   await requireAdmin(env, email);
   const employee = await findEmployeeById(env.DB, employeeId);
@@ -513,34 +517,55 @@ export async function adminSyncToJinjer(env: Env, email: string, employeeId: str
   if (!employee.JinjerEmployeeId) {
     throw new ApiError('jinjerの社員番号が未設定です（設定 > 新入社員登録の個別編集で入力してください）');
   }
-  if (employee.JinjerSyncedAt) {
-    throw new ApiError('この方の緊急連絡先は送信済みです（jinjer側は重複登録防止のため再送信できません）');
-  }
   const { baseUrl, accessToken } = await requireJinjerConfig(env);
 
   const contacts = await listEmergencyContacts(env.DB, employeeId);
   if (!contacts.length) throw new ApiError('緊急連絡先が登録されていません');
 
-  for (const c of contacts) {
-    const nationalLocalGovernmentCode = (await findMunicipalityCode(env.DB, c.Prefecture, c.City)) ?? undefined;
-    await syncEmergencyContact(baseUrl, accessToken, employee.JinjerEmployeeId, {
-      lastName: c.LastName,
-      firstName: c.FirstName,
-      lastNameKana: c.LastNameKana,
-      firstNameKana: c.FirstNameKana,
-      phoneNumber: c.PhoneNumber,
-      postalCode: c.PostalCode,
-      addressKana: c.AddressKana,
-      addressLine: c.AddressLine,
-      building: c.Building,
-      email: c.Email,
-      relationshipId: resolveRelationshipId(c.Relationship),
-      nationalLocalGovernmentCode
-    });
+  const alreadySynced = await getSyncedContactFingerprints(env.DB, employeeId);
+  const pending = contacts.filter((c) => !alreadySynced.has(contactFingerprint(c)));
+  if (!pending.length) {
+    throw new ApiError('登録されている緊急連絡先は、いずれも送信済みです（jinjer側は重複登録防止のため再送信できません）');
   }
 
-  await markJinjerSynced(env.DB, employeeId, nowStr());
-  await appendHistory(env.DB, employeeId, '', 'jinjer同期', `緊急連絡先${contacts.length}件をjinjerに登録`, email);
+  let sentCount = 0;
+  const failures: string[] = [];
+  for (const c of pending) {
+    const fingerprint = contactFingerprint(c);
+    try {
+      const nationalLocalGovernmentCode = (await findMunicipalityCode(env.DB, c.Prefecture, c.City)) ?? undefined;
+      await syncEmergencyContact(baseUrl, accessToken, employee.JinjerEmployeeId, {
+        lastName: c.LastName,
+        firstName: c.FirstName,
+        lastNameKana: c.LastNameKana,
+        firstNameKana: c.FirstNameKana,
+        phoneNumber: c.PhoneNumber,
+        postalCode: c.PostalCode,
+        addressKana: c.AddressKana,
+        addressLine: c.AddressLine,
+        building: c.Building,
+        email: c.Email,
+        relationshipId: resolveRelationshipId(c.Relationship),
+        nationalLocalGovernmentCode
+      });
+      // 送信直後、その連絡先だけを送信済みとして記録する(全件終わってからまとめて記録すると、
+      // 途中で失敗した場合に成功済みの分まで未送信扱いのままになり、再実行で重複登録されるため)
+      await markContactSynced(env.DB, employeeId, fingerprint, nowStr());
+      sentCount++;
+    } catch (err) {
+      failures.push(`${c.LastName}${c.FirstName}（${err instanceof Error ? err.message : String(err)}）`);
+    }
+  }
+
+  if (sentCount > 0) {
+    await markJinjerSynced(env.DB, employeeId, nowStr());
+  }
+  const summary = failures.length
+    ? `緊急連絡先${sentCount}件をjinjerに登録（失敗: ${failures.join('、')}）`
+    : `緊急連絡先${sentCount}件をjinjerに登録`;
+  await appendHistory(env.DB, employeeId, '', 'jinjer同期', summary, email);
+  if (!sentCount) throw new ApiError(`jinjerへの送信にすべて失敗しました（${failures.join('、')}）`);
+  if (failures.length) throw new ApiError(`一部の送信に失敗しました。成功: ${sentCount}件 / 失敗: ${failures.join('、')}（成功分は記録済みのため、再実行しても重複登録されません）`);
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 
@@ -600,62 +625,73 @@ export async function adminSendFilesToJinjer(env: Env, email: string, employeeId
     return recordCode;
   }
 
+  // 1件の送信に失敗しても、それ以外の書類の送信を続ける(1件のエラーで全件が止まると、
+  // どこまで成功していたかが分かりにくくなるため)。成功した分はmarkJinjerSentでその場で記録するので、
+  // 失敗した書類だけをやり直したい場合に再実行しても、成功済みの分が重複送信されることはない。
   let sentCount = 0;
+  const failures: string[] = [];
   for (const d of targets) {
     const sub = subs[d.key];
-    const obj = await getEmployeeFile(env.DOCS, sub.StorageKey);
-    if (obj) {
-      const extMatch = sub.StorageKey.match(/\.([^./]+)$/);
-      const ext = extMatch ? `.${extMatch[1]}` : '';
-      const isResend = !!sub.JinjerSentStorageKey && sub.JinjerSentStorageKey !== sub.StorageKey;
-      const recordCode = await resolveRecordCode(d, isResend);
-
-      await attachFile(baseUrl, accessToken, {
-        employeeId: employee.JinjerEmployeeId,
-        customMenuId: d.jinjerCustomMenuId!,
-        customItemId: d.jinjerCustomItemId!,
-        recordCode,
-        fileName: `${employee.Name}_${d.label}${d.dualFile ? '(表面)' : ''}${ext}`,
-        bytes: await obj.arrayBuffer()
-      });
-      await markJinjerSent(env.DB, employeeId, d.key, sub.StorageKey);
-      sentCount++;
-    }
-
-    // dualFileの2枚目(裏面)。1枚目とは別のカスタム項目IDに、同じメニュー内のレコードとして送る
-    if (d.dualFile && d.jinjerCustomItemId2 && sub.StorageKey2) {
-      const obj2 = await getEmployeeFile(env.DOCS, sub.StorageKey2);
-      if (obj2) {
-        const extMatch2 = sub.StorageKey2.match(/\.([^./]+)$/);
-        const ext2 = extMatch2 ? `.${extMatch2[1]}` : '';
-        const isResend2 = !!sub.JinjerSentStorageKey2 && sub.JinjerSentStorageKey2 !== sub.StorageKey2;
-        const recordCode2 = await resolveRecordCode(d, isResend2);
+    try {
+      const obj = await getEmployeeFile(env.DOCS, sub.StorageKey);
+      if (obj) {
+        const extMatch = sub.StorageKey.match(/\.([^./]+)$/);
+        const ext = extMatch ? `.${extMatch[1]}` : '';
+        const isResend = !!sub.JinjerSentStorageKey && sub.JinjerSentStorageKey !== sub.StorageKey;
+        const recordCode = await resolveRecordCode(d, isResend);
 
         await attachFile(baseUrl, accessToken, {
           employeeId: employee.JinjerEmployeeId,
           customMenuId: d.jinjerCustomMenuId!,
-          customItemId: d.jinjerCustomItemId2,
-          recordCode: recordCode2,
-          fileName: `${employee.Name}_${d.label}(裏面)${ext2}`,
-          bytes: await obj2.arrayBuffer()
+          customItemId: d.jinjerCustomItemId!,
+          recordCode,
+          fileName: `${employee.Name}_${d.label}${d.dualFile ? '(表面)' : ''}${ext}`,
+          bytes: await obj.arrayBuffer()
         });
-        await markJinjerSent(env.DB, employeeId, d.key, sub.StorageKey2, 2);
+        await markJinjerSent(env.DB, employeeId, d.key, sub.StorageKey);
         sentCount++;
+      }
+    } catch (err) {
+      failures.push(`${d.label}${d.dualFile ? '(表面)' : ''}（${err instanceof Error ? err.message : String(err)}）`);
+    }
+
+    // dualFileの2枚目(裏面)。1枚目とは別のカスタム項目IDに、同じメニュー内のレコードとして送る
+    if (d.dualFile && d.jinjerCustomItemId2 && sub.StorageKey2) {
+      try {
+        const obj2 = await getEmployeeFile(env.DOCS, sub.StorageKey2);
+        if (obj2) {
+          const extMatch2 = sub.StorageKey2.match(/\.([^./]+)$/);
+          const ext2 = extMatch2 ? `.${extMatch2[1]}` : '';
+          const isResend2 = !!sub.JinjerSentStorageKey2 && sub.JinjerSentStorageKey2 !== sub.StorageKey2;
+          const recordCode2 = await resolveRecordCode(d, isResend2);
+
+          await attachFile(baseUrl, accessToken, {
+            employeeId: employee.JinjerEmployeeId,
+            customMenuId: d.jinjerCustomMenuId!,
+            customItemId: d.jinjerCustomItemId2,
+            recordCode: recordCode2,
+            fileName: `${employee.Name}_${d.label}(裏面)${ext2}`,
+            bytes: await obj2.arrayBuffer()
+          });
+          await markJinjerSent(env.DB, employeeId, d.key, sub.StorageKey2, 2);
+          sentCount++;
+        }
+      } catch (err) {
+        failures.push(`${d.label}(裏面)（${err instanceof Error ? err.message : String(err)}）`);
       }
     }
   }
-  if (!sentCount) throw new ApiError('送信対象のファイル実体が見つかりませんでした');
+  if (!sentCount && !failures.length) throw new ApiError('送信対象のファイル実体が見つかりませんでした');
 
   // このAPIは非同期処理のため、200が返っても実際に登録できたとは限らない(src/jinjer.ts先頭のコメント参照)。
   // 反映確認はjinjer側の画面で行ってもらう想定。
-  await appendHistory(
-    env.DB,
-    employeeId,
-    '',
-    'jinjerファイル送信',
-    `承認済み書類${sentCount}件をjinjerに送信リクエスト（反映まで数分かかる場合があります。jinjer側で確認してください）`,
-    email
-  );
+  const summary = failures.length
+    ? `承認済み書類${sentCount}件をjinjerに送信リクエスト（失敗: ${failures.join('、')}）`
+    : `承認済み書類${sentCount}件をjinjerに送信リクエスト（反映まで数分かかる場合があります。jinjer側で確認してください）`;
+  await appendHistory(env.DB, employeeId, '', 'jinjerファイル送信', summary, email);
+  if (failures.length) {
+    throw new ApiError(`一部の送信に失敗しました。成功: ${sentCount}件 / 失敗: ${failures.join('、')}（成功分は記録済みのため、再実行しても重複送信されません）`);
+  }
   return adminGetEmployeeDetail(env, email, employeeId);
 }
 

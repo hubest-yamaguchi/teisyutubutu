@@ -165,7 +165,10 @@ export async function syncFolderPermissions(
   return { granted, revoked };
 }
 
-// 同名ファイルが既にあれば削除してから保存する(上書き。旧gas-app/Drive.gsのsaveEmployeeFile_と同じ挙動)。
+// 同名ファイルが既にあれば置き換える(上書き)。ただし「先に消してからアップロード」の順序だと、
+// 削除が成功した直後にアップロードが失敗した場合に新旧どちらのファイルも残らなくなってしまうため、
+// 必ず「先に新しいファイルをアップロードして成功を確認→それから古いファイルを消す」順序にする
+// (アップロードが失敗しても、古いファイルがそのまま残るようにするため)。
 export async function uploadFileToDrive(
   accessToken: string,
   folderId: string,
@@ -174,12 +177,6 @@ export async function uploadFileToDrive(
   bytes: ArrayBuffer
 ): Promise<string> {
   const existingId = await findChildByName(accessToken, folderId, fileName);
-  if (existingId) {
-    await fetch(`https://www.googleapis.com/drive/v3/files/${existingId}?supportsAllDrives=true`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-  }
 
   const boundary = crypto.randomUUID();
   const metadata = JSON.stringify({ name: fileName, parents: [folderId] });
@@ -199,5 +196,13 @@ export async function uploadFileToDrive(
   });
   if (!res.ok) throw new Error(`Driveへのアップロードに失敗しました: ${await res.text()}`);
   const data = await res.json<{ id: string }>();
+
+  if (existingId) {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${existingId}?supportsAllDrives=true`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+  }
+
   return data.id;
 }

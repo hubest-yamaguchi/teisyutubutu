@@ -75,6 +75,8 @@
 //
 // [drive.ts]と同じ方針で、Workers環境向けにfetchで直接REST APIを叩く(SDKは使わない)。
 
+import { fetchWithRetry } from './util/fetchRetry';
+
 // 続柄マスタ(GET /v1/master/relationships、全33件・固定)。変更頻度が低いためハードコードする。
 const RELATIONSHIP_ID_BY_NAME: Record<string, string> = {
   本人: '1', 妻: '2', 夫: '3', 母: '4', 父: '5', 長男: '6', 長女: '7', 次男: '8', 次女: '9',
@@ -129,9 +131,10 @@ export type JinjerFileAttachment = {
 
 type JinjerEnvelope<T> = { results: 'success'; data: T } | { results: 'failure'; errors: { code: string; reason: string; message: string }[] };
 
-// jinjer共通のレスポンス封筒({results, data|errors})を解いて、失敗時はerrorsのmessageをそのまま例外にする
+// jinjer共通のレスポンス封筒({results, data|errors})を解いて、失敗時はerrorsのmessageをそのまま例外にする。
+// 429・5xxは一時的なエラーとみなし、少し間隔を空けて自動的に再試行する(fetchWithRetry)。
 async function jinjerFetch<T>(url: string, init: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
+  const res = await fetchWithRetry(url, init);
   const json = await res.json<JinjerEnvelope<T>>().catch(() => null);
   if (json && json.results === 'success') return json.data;
   const message = json && json.results === 'failure' ? json.errors.map((e) => e.message).join(' / ') : `HTTPステータス ${res.status}`;

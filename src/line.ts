@@ -3,6 +3,7 @@
 import { getSetting } from './db/settings';
 import { SETTINGS_KEYS } from './db/settings';
 import { logNotifications, buildNotificationLogRow, SendResult } from './db/notifications';
+import { fetchWithRetry } from './util/fetchRetry';
 
 type NotificationRequest = { url: string; method: 'POST'; headers: Record<string, string>; body: string };
 type BuiltNotification = { skip: string } | { request: NotificationRequest };
@@ -22,7 +23,7 @@ async function buildNotificationRequest(db: D1Database, lineUserId: string, mess
 }
 
 async function sendRequest(req: NotificationRequest): Promise<SendResult> {
-  const res = await fetch(req.url, { method: req.method, headers: req.headers, body: req.body });
+  const res = await fetchWithRetry(req.url, { method: req.method, headers: req.headers, body: req.body });
   if (res.ok) return { sent: true };
   const text = await res.text().catch(() => '');
   console.log(`LINE push failed (${res.status}): ${text}`);
@@ -71,7 +72,7 @@ export async function fetchLineMessageContent(
   channelAccessToken: string,
   messageId: string
 ): Promise<{ bytes: ArrayBuffer; mimeType: string } | null> {
-  const res = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
+  const res = await fetchWithRetry(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
     headers: { Authorization: `Bearer ${channelAccessToken}` }
   });
   if (!res.ok) {
