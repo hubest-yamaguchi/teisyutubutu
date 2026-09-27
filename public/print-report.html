@@ -11,17 +11,17 @@
   .meta-row { display:flex; gap:24px; flex-wrap:wrap; margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid #DBE1DF; }
   .meta-row div span { display:block; font-size:.72rem; color:#8A9490; }
   .meta-row div b { font-size:.95rem; }
-  .body-text { line-height:1.9; font-size:.95rem; text-align:justify; }
-  .body-text p { margin:0 0 1em; }
-  .body-text p:last-child { margin-bottom:0; }
+  .body-text { white-space:pre-wrap; line-height:1.9; font-size:.95rem; }
   .toolbar { max-width:720px; margin:0 auto 14px; text-align:right; }
   .toolbar button { background:#3A4E75; color:#fff; border:none; padding:9px 18px; border-radius:8px; font-size:.85rem; font-weight:700; cursor:pointer; font-family:inherit; }
   .muted { color:#8A9490; font-size:.85rem; text-align:center; padding:40px 0; }
   @media print {
-    body { background:#fff; padding:0; }
+    body { background:#fff; }
     .toolbar { display:none; }
-    .sheet { border:none; padding:0; max-width:none; }
+    .sheet { border:none; }
   }
+  /* 印刷・PDF保存時の余白(上下左右に程よい空白を持たせる。ブラウザ側の印刷マージン設定に関わらず確保する) */
+  @page { margin: 18mm 15mm; }
 </style>
 </head>
 <body>
@@ -35,16 +35,6 @@
   <script>
     function escHtml_(v) {
       return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    }
-
-    // 空行で区切られた段落ごとに、段落内の改行はスペースに詰めて幅いっぱいに折り返すようにする
-    // (元の文章が1文ごとに改行されていると、そのまま表示すると行が短く途中で終わり、左に寄って見えるため)。
-    function formatBodyText_(text) {
-      var paragraphs = String(text || '').replace(/\r\n/g, '\n').split(/\n{2,}/);
-      return paragraphs.map(function (p) {
-        var joined = p.split('\n').map(function (line) { return line.trim(); }).filter(Boolean).join(' ');
-        return joined ? '<p>' + escHtml_(joined) + '</p>' : '';
-      }).join('');
     }
 
     var params = new URLSearchParams(location.search);
@@ -71,7 +61,7 @@
         '<div><span>氏名</span><b>' + escHtml_(r.name) + '</b></div>' +
         '<div><span>提出日</span><b>' + escHtml_(r.submittedAt) + '</b></div>' +
         '</div>' +
-        '<div class="body-text">' + formatBodyText_(r.textContent) + '</div>';
+        '<div class="body-text">' + escHtml_(r.textContent) + '</div>';
       document.getElementById('toolbar').hidden = false;
     }).catch(function (err) {
       document.getElementById('sheet').innerHTML = '<p class="muted" style="color:#C1443A;">' + escHtml_(err.message || String(err)) + '</p>';
