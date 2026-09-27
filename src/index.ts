@@ -79,6 +79,7 @@ const LIFF_FUNCTIONS: Record<string, (env: Env, ...args: any[]) => Promise<unkno
   submitDocument: liffApi.submitDocument,
   submitDocumentText: liffApi.submitDocumentText,
   getTextSubmissionForPrint: liffApi.getTextSubmissionForPrint,
+  lookupPostalCode: liffApi.lookupPostalCode,
   getMyStatusByLine: liffApi.getMyStatusByLine
 };
 

@@ -370,10 +370,31 @@
     // 1件目のみ姓・名・続柄・電話番号を必須とし、フリガナ・住所・E-mailは任意。「+ 連絡先を追加」で複数件入力できる。
     var EC_NEXT_INDEX = 0;
 
-    function ecFieldRow_(idx, field, label, type, required, value) {
+    function ecFieldRow_(idx, field, label, type, required, value, extraAttrs) {
       return '<label class="muted">' + label + (required ? '<span style="color:#C1443A;">（必須）</span>' : '') + '</label>' +
-        '<input type="' + (type || 'text') + '" id="ec-' + idx + '-' + field + '" value="' + escHtml_(value || '') + '" ' +
+        '<input type="' + (type || 'text') + '" id="ec-' + idx + '-' + field + '" value="' + escHtml_(value || '') + '" ' + (extraAttrs || '') +
         'style="width:100%;padding:8px;border:1px solid #DBE1DF;border-radius:8px;font-size:.85rem;margin:2px 0 8px;box-sizing:border-box;">';
+    }
+
+    // 郵便番号欄からフォーカスが外れた時、7桁ならサーバー経由で住所を検索し、都道府県・市区町村・
+    // 住所(フリガナ)を自動入力する(丁目・番地は空欄の場合のみ町域名を入れておく)。見つからなくても
+    // 何もしない(手入力を続けられる)。
+    function lookupPostalCode_(idx) {
+      var input = document.getElementById('ec-' + idx + '-PostalCode');
+      if (!input) return;
+      var digits = input.value.replace(/[^0-9]/g, '');
+      if (digits.length !== 7) return;
+      callServer_('lookupPostalCode', [digits]).then(function (res) {
+        if (!res || !res.found) return;
+        var pref = document.getElementById('ec-' + idx + '-Prefecture');
+        var city = document.getElementById('ec-' + idx + '-City');
+        var kana = document.getElementById('ec-' + idx + '-AddressKana');
+        var line = document.getElementById('ec-' + idx + '-AddressLine');
+        if (pref) pref.value = res.prefecture;
+        if (city) city.value = res.city;
+        if (kana) kana.value = res.addressKana;
+        if (line && !line.value.trim() && res.town) line.value = res.town;
+      }).catch(function () { /* 検索に失敗しても手入力を続けられるよう、何もしない */ });
     }
 
     function ecBlockHtml_(idx, data) {
@@ -390,7 +411,7 @@
         ecFieldRow_(idx, 'FirstName', '名', 'text', isFirst, data.FirstName) +
         ecFieldRow_(idx, 'Relationship', '続柄（例: 父・母・配偶者）', 'text', isFirst, data.Relationship) +
         ecFieldRow_(idx, 'PhoneNumber', '電話番号', 'tel', isFirst, data.PhoneNumber) +
-        ecFieldRow_(idx, 'PostalCode', '郵便番号', 'text', false, data.PostalCode) +
+        ecFieldRow_(idx, 'PostalCode', '郵便番号（入力すると住所を自動検索します）', 'text', false, data.PostalCode, 'onblur="lookupPostalCode_(' + idx + ')" ') +
         ecFieldRow_(idx, 'AddressKana', '住所（フリガナ）', 'text', false, data.AddressKana) +
         ecFieldRow_(idx, 'Prefecture', '都道府県', 'text', false, data.Prefecture) +
         ecFieldRow_(idx, 'City', '市区町村', 'text', false, data.City) +

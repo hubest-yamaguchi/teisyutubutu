@@ -12,6 +12,8 @@ import { saveEmployeeFile } from '../r2';
 import { getSetting } from '../db/settings';
 import { SETTINGS_KEYS } from '../db/settings';
 import { todayStr } from '../util/date';
+import { fetchWithRetry } from '../util/fetchRetry';
+import { toFullWidthKatakana } from '../util/kana';
 
 class ApiError extends Error {}
 
@@ -330,6 +332,34 @@ export async function getTextSubmissionForPrint(env: Env, eid: string, docKey: s
     name: employee.Name || '',
     submittedAt: sub.SubmittedAt || '',
     textContent: sub.TextContent
+  };
+}
+
+// 郵便番号から都道府県・市区町村(+町域)とその読みを検索する(zipcloud: https://zipcloud.ibsnet.co.jp/)。
+// 緊急連絡先の入力補助用。見つからない場合や外部APIが不調な場合は found:false を返し、呼び出し側(本人)は
+// 引き続き手入力できる(検索失敗が提出のブロックにならないようにする)。
+export async function lookupPostalCode(_env: Env, postalCode: string) {
+  const digits = String(postalCode || '').replace(/[^0-9]/g, '');
+  if (digits.length !== 7) return { found: false };
+
+  const res = await fetchWithRetry(`https://zipcloud.ibsnet.co.jp/api/search?zipcode=${digits}`, {});
+  if (!res.ok) return { found: false };
+  const data = await res
+    .json<{
+      status: number;
+      results: { address1: string; address2: string; address3: string; kana1: string; kana2: string; kana3: string }[] | null;
+    }>()
+    .catch(() => null);
+  if (!data || data.status !== 200 || !data.results || !data.results.length) return { found: false };
+
+  const r = data.results[0];
+  return {
+    found: true,
+    prefecture: r.address1 || '',
+    city: r.address2 || '',
+    town: r.address3 || '',
+    // zipcloudは読みを半角カナで返すため、他のフリガナ欄と体裁を揃えるために全角カナへ変換する
+    addressKana: toFullWidthKatakana(`${r.kana1 || ''}${r.kana2 || ''}${r.kana3 || ''}`)
   };
 }
 
