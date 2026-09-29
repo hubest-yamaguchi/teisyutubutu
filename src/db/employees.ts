@@ -16,6 +16,7 @@ export type Employee = {
   JinjerEmployeeId?: string;
   JinjerSyncedAt?: string;
   EmergencyContactsSyncedAt?: string;
+  IdentityConfirmedAt?: string;
 };
 
 export async function findEmployeeById(db: D1Database, employeeId: string): Promise<Employee | null> {
@@ -106,6 +107,11 @@ export async function markDriveSaved(db: D1Database, employeeId: string, timesta
 // 事前に入力しておくもの(社員番号の紐付けタイミングについてはsrc/api/admin.tsのadminSyncToJinjer参照)。
 export async function setJinjerEmployeeId(db: D1Database, employeeId: string, jinjerEmployeeId: string): Promise<void> {
   await db.prepare('UPDATE employees SET JinjerEmployeeId = ? WHERE EmployeeId = ?').bind(jinjerEmployeeId, employeeId).run();
+}
+
+// 本人がLIFFの確認画面で「はい(合っています)」を選んだ時に記録する(管理画面の「本人確認済み」の判定に使う)
+export async function markIdentityConfirmed(db: D1Database, employeeId: string, timestamp: string): Promise<void> {
+  await db.prepare('UPDATE employees SET IdentityConfirmedAt = ? WHERE EmployeeId = ?').bind(timestamp, employeeId).run();
 }
 
 export async function markJinjerSynced(db: D1Database, employeeId: string, timestamp: string): Promise<void> {

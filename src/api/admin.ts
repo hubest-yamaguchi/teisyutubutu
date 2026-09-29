@@ -763,6 +763,7 @@ export async function settingsGet(env: Env, email: string) {
       hireType: e.HireType || '',
       hireDate: e.HireDate,
       linked: !!e.LineUserId,
+      identityConfirmedAt: e.IdentityConfirmedAt || '',
       jinjerEmployeeId: e.JinjerEmployeeId || '',
       jinjerSyncedAt: e.JinjerSyncedAt || ''
     })),
@@ -779,14 +780,18 @@ export async function settingsAddEmployee(env: Env, email: string, name: string,
   if (!name || !String(name).trim()) throw new ApiError('氏名を入力してください');
   if (!jobType || !String(jobType).trim()) throw new ApiError('職種を入力してください（本人確認・配属先の自動決定に使用します）');
   const id = await nextEmployeeId(env.DB);
+  const trimmedJobType = String(jobType).trim();
+  // 配属先は本人確認を待たずに管理側で確認できるよう、登録時点で職種法人マスタから決める
+  // (本人確認時にもconfirmBindで改めて職種法人マスタから決め直す)
+  const companyMap = await getJobTypeCompanyMap(env.DB);
   await saveEmployee(env.DB, {
     EmployeeId: id,
     Name: String(name).trim(),
     Kana: (kana || '').toString().trim(),
-    Company: '',
+    Company: companyMap[trimmedJobType] || '',
     Commute: '',
     HireDate: '',
-    JobType: String(jobType).trim(),
+    JobType: trimmedJobType,
     LineUserId: ''
   });
   return { employeeId: id };
@@ -830,20 +835,24 @@ export async function settingsBulkAddEmployees(env: Env, email: string, rows: Bu
   await requirePermission(env, email, 'emp');
   const valid: Omit<Employee, 'EmployeeId'>[] = [];
   const errors: { row: number; reason: string }[] = [];
+  let skipped = 0;
+  const companyMap = await getJobTypeCompanyMap(env.DB);
   (rows || []).forEach((row, i) => {
     const name = (row['氏名'] || row['Name'] || '').toString().trim();
     const kana = (row['フリガナ'] || row['Kana'] || '').toString().trim();
     const jobType = (row['職種'] || row['JobType'] || '').toString().trim();
+    // 氏名もフリガナも無い行は、NO列や職種だけが入った「空き枠」の行として読み飛ばす(エラーにはしない)
+    if (!name && !kana) { skipped++; return; }
     if (!name) { errors.push({ row: i + 2, reason: '氏名が空です' }); return; }
     if (!jobType) { errors.push({ row: i + 2, reason: '職種が空です（本人確認・配属先の自動決定に使用するため必須です）' }); return; }
-    valid.push({ Name: name, Kana: kana, Company: '', Commute: '', HireDate: '', JobType: jobType, LineUserId: '' });
+    valid.push({ Name: name, Kana: kana, Company: companyMap[jobType] || '', Commute: '', HireDate: '', JobType: jobType, LineUserId: '' });
   });
 
   const ids = await nextEmployeeIds(env.DB, valid.length);
   const withIds: Employee[] = valid.map((e, i) => ({ ...e, EmployeeId: ids[i] }));
   if (withIds.length) await saveEmployees(env.DB, withIds);
 
-  return { added: withIds.map((e) => ({ employeeId: e.EmployeeId, name: e.Name })), errors };
+  return { added: withIds.map((e) => ({ employeeId: e.EmployeeId, name: e.Name })), errors, skipped };
 }
 
 // CSV/Excelから「社員番号(jinjer側)」と「氏名」の組を読み込み、氏名の完全一致で新入社員一覧と紐付ける。

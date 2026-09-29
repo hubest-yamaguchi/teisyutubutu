@@ -2,7 +2,7 @@
 
 import type { Env } from '../bindings';
 import { COMMUTES, HIRE_TYPES, computeStage, progressPct, isApplicable, STATUS, DocType } from '../model';
-import { findEmployeeById, findEmployeeByLineUserId, findUnlinkedEmployeesByKana, normalizeKana, saveEmployee, Employee } from '../db/employees';
+import { findEmployeeById, findEmployeeByLineUserId, findUnlinkedEmployeesByKana, normalizeKana, saveEmployee, markIdentityConfirmed, Employee } from '../db/employees';
 import { getJobTypeCompanyMap } from '../db/jobTypeMap';
 import { getSubmissionsMap, upsertSubmission } from '../db/submissions';
 import { appendHistory } from '../db/history';
@@ -11,7 +11,7 @@ import { listEmergencyContacts, saveEmergencyContacts, EmergencyContact } from '
 import { saveEmployeeFile } from '../r2';
 import { getSetting } from '../db/settings';
 import { SETTINGS_KEYS } from '../db/settings';
-import { todayStr } from '../util/date';
+import { todayStr, nowStr } from '../util/date';
 import { fetchWithRetry } from '../util/fetchRetry';
 import { toFullWidthKatakana } from '../util/kana';
 
@@ -170,6 +170,7 @@ export async function confirmBind(env: Env, employeeId: string, kana: string, li
   employee.Company = company;
   employee.PictureUrl = pictureUrl || '';
   await saveEmployee(env.DB, employee);
+  await markIdentityConfirmed(env.DB, employee.EmployeeId, nowStr());
   await appendHistory(env.DB, employee.EmployeeId, '', 'LINE連携', `LINE表示名: ${displayName || ''} / 職種: ${employee.JobType} / 配属先: ${company}`, '');
 
   const payload = await buildDocumentsPayload(env.DB, employee);
