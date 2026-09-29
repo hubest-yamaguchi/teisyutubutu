@@ -46,18 +46,18 @@ export async function insertInboundMessage(
     .run();
 }
 
-// ダッシュボードの「未返信件数」バッジ用。各社員について、最後に管理者が返信(Direction='out')した後に
-// 届いた内定者からのメッセージ(Direction='in')の件数を数える(まだ一度も返信していない社員は、
-// 届いた内定者メッセージ全件が対象になる)。
+// ダッシュボードの「未返信件数」バッジ用。各社員について、最後に管理者が返信(Direction='out')した時点、
+// または「対応済み」を押した時点(line_message_handled)のうち新しい方より後に届いた内定者からの
+// メッセージ(Direction='in')の件数を数える(どちらもまだの社員は、届いた内定者メッセージ全件が対象になる)。
 export async function getUnrepliedCounts(db: D1Database): Promise<Record<string, number>> {
   const { results } = await db
     .prepare(
       `SELECT EmployeeId, COUNT(*) AS n
        FROM line_messages m
        WHERE Direction = 'in'
-         AND Id > COALESCE(
-           (SELECT MAX(Id) FROM line_messages m2 WHERE m2.EmployeeId = m.EmployeeId AND m2.Direction = 'out'),
-           0
+         AND Id > MAX(
+           COALESCE((SELECT MAX(Id) FROM line_messages m2 WHERE m2.EmployeeId = m.EmployeeId AND m2.Direction = 'out'), 0),
+           COALESCE((SELECT HandledUpToId FROM line_message_handled h WHERE h.EmployeeId = m.EmployeeId), 0)
          )
        GROUP BY EmployeeId`
     )
@@ -83,6 +83,20 @@ export async function getLatestMessages(
     map[r.EmployeeId] = { text: r.Text, direction: r.Direction, messageType: r.MessageType, createdAt: r.CreatedAt };
   }
   return map;
+}
+
+// 返信せずに「対応済み」にする。押した時点までに届いているメッセージをすべて対応済み扱いにする
+// (押した後に届いたメッセージは、また未返信として数える)。
+export async function markMessagesHandled(db: D1Database, employeeId: string, adminEmail: string): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO line_message_handled (EmployeeId, HandledUpToId, HandledBy, HandledAt)
+       VALUES (?, COALESCE((SELECT MAX(Id) FROM line_messages WHERE EmployeeId = ?), 0), ?, ?)
+       ON CONFLICT(EmployeeId) DO UPDATE SET
+         HandledUpToId = excluded.HandledUpToId, HandledBy = excluded.HandledBy, HandledAt = excluded.HandledAt`
+    )
+    .bind(employeeId, employeeId, adminEmail, nowStr())
+    .run();
 }
 
 export async function insertOutboundMessage(db: D1Database, employeeId: string, text: string, adminEmail: string): Promise<void> {

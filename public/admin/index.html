@@ -123,6 +123,7 @@
     .chat-row.in .chat-bubble { background:#fff; color:#1D2321; }
     .chat-bubble img { max-width:220px; border-radius:8px; display:block; cursor:pointer; }
     .chat-meta { font-size:.66rem; color:#8A9490; margin-top:2px; }
+    .chat-input { resize:vertical; min-height:84px; line-height:1.5; font-family:inherit; }
 
     /* ---- 保存完了トースト ---- */
     .toast { position:fixed; left:50%; bottom:28px; transform:translate(-50%,20px); background:#1D2321; color:#fff; padding:10px 20px; border-radius:999px; font-size:.85rem; font-weight:700; box-shadow:0 6px 20px rgba(0,0,0,.2); opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease; z-index:100; display:flex; align-items:center; gap:8px; }
@@ -441,9 +442,7 @@
       return '<div class="avatar" style="width:' + size + 'px;height:' + size + 'px;line-height:' + size + 'px;background:' + color + ';font-size:' + Math.round(size * 0.42) + 'px;">' + name.slice(0, 1) + '</div>';
     }
 
-    function renderDashboard() {
-      var data = window.__lastDashboard;
-      if (!data) return;
+    function dashKpiHtml_(data) {
       var kpiKeys = ['total', '未提出', '確認中', '差し戻し', '原本待ち', '受入準備完了'];
       var kpiLabels = { total: '全新入社員', '未提出': '未提出', '確認中': '確認中', '差し戻し': '差し戻し中', '原本待ち': '原本提出待ち', '受入準備完了': '受入準備完了' };
       var kpiHtml = kpiKeys.map(function (k) {
@@ -455,16 +454,11 @@
         '<div class="kpi clickable' + (DASH_UNREAD_ONLY ? ' active' : '') + '"' +
         (data.kpi.unread ? ' style="border-color:#C1443A;"' : '') + ' onclick="toggleUnreadOnly_()">' +
         '<div class="label">未返信メッセージ</div><div class="value"' + (data.kpi.unread ? ' style="color:#C1443A;"' : '') + '>' + (data.kpi.unread || 0) + '</div></div>';
+      return kpiHtml;
+    }
 
-      var companyOptions = ['すべて'].concat(data.companies).map(function (c) {
-        return '<option ' + (c === CURRENT_COMPANY_FILTER ? 'selected' : '') + '>' + c + '</option>';
-      }).join('');
-
-      var rows = filteredDashRows_();
-      if (DASH_SELECTED_ID && !rows.some(function (r) { return r.id === DASH_SELECTED_ID; })) DASH_SELECTED_ID = null;
-      if (!DASH_SELECTED_ID && rows.length) DASH_SELECTED_ID = rows[0].id;
-
-      var listHtml = rows.map(function (r) {
+    function dashListHtml_(rows) {
+      return rows.map(function (r) {
         var st = overallStatus_(r);
         var preview = '';
         if (r.lastMessage) {
@@ -485,6 +479,22 @@
           '</div>' +
           '</div>';
       }).join('') || '<p class="muted" style="padding:16px;">該当する新入社員がいません</p>';
+    }
+
+    function renderDashboard() {
+      var data = window.__lastDashboard;
+      if (!data) return;
+      var kpiHtml = dashKpiHtml_(data);
+
+      var companyOptions = ['すべて'].concat(data.companies).map(function (c) {
+        return '<option ' + (c === CURRENT_COMPANY_FILTER ? 'selected' : '') + '>' + c + '</option>';
+      }).join('');
+
+      var rows = filteredDashRows_();
+      if (DASH_SELECTED_ID && !rows.some(function (r) { return r.id === DASH_SELECTED_ID; })) DASH_SELECTED_ID = null;
+      if (!DASH_SELECTED_ID && rows.length) DASH_SELECTED_ID = rows[0].id;
+
+      var listHtml = dashListHtml_(rows);
 
       var sortOptions = [
         { key: 'unread', label: '未返信を優先' },
@@ -510,6 +520,19 @@
         '</div>';
 
       renderDetailPane_();
+    }
+
+    // 返信・対応済み・新着受信の後に、KPIと左の一覧(未返信バッジ)だけを最新にする。
+    // renderDashboard()だと右の詳細まで作り直され、入力途中の返信文が消えてしまうため分けている。
+    function refreshDashboardCounts_() {
+      return callServer_('adminGetDashboard', [CURRENT_COMPANY_FILTER]).then(function (data) {
+        window.__lastDashboard = data;
+        var kpiEl = document.querySelector('.kpi-row');
+        var listEl = document.querySelector('.list-scroll');
+        if (kpiEl) kpiEl.innerHTML = dashKpiHtml_(data);
+        if (listEl) listEl.innerHTML = dashListHtml_(filteredDashRows_());
+        renderChatHandledBtn_();
+      }).catch(function () { /* バッジ更新の失敗は致命的でないため無視(次回の更新で反映される) */ });
     }
 
     function selectPerson_(id) {
@@ -665,8 +688,10 @@
         '<div class="chat-scroll" id="chatMessages"><p class="muted">読み込み中…</p></div>' +
         '<div class="muted" style="margin-top:8px;">よく使うメッセージ：</div>' +
         '<div class="row-flex" id="chatTpl" style="margin-bottom:4px;"></div>' +
-        '<div class="row-flex" style="flex-wrap:nowrap;">' +
-        '<input type="text" id="chatInput" placeholder="メッセージを入力" style="flex:1;" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendChatMessage();}">' +
+        // Enterキーは改行のみ(誤送信防止)。全文を確認してから「送信」ボタンで送る
+        '<textarea id="chatInput" class="chat-input" rows="4" placeholder="メッセージを入力（Enterで改行。内容を確認してから「送信」を押してください）"></textarea>' +
+        '<div class="row-flex" style="justify-content:flex-end;margin-top:6px;">' +
+        '<span id="chatHandledArea"></span>' +
         '<button class="btn" onclick="sendChatMessage()">送信</button>' +
         '</div>' +
         '<div id="chatSendError" class="muted" style="color:#C1443A;margin-top:4px;"></div>' +
@@ -692,6 +717,7 @@
       if (TEMPLATES) { renderBatchChips_(); renderChatChips_(); }
       loadMessages_();
       startChatPoll_();
+      renderChatHandledBtn_();
     }
 
     // 「差し戻す」チェックボックスON/OFFで、その書類の理由入力欄を開閉する
@@ -890,7 +916,7 @@
     function startChatPoll_() {
       stopChatPoll_();
       CHAT_POLL_TIMER_ = setInterval(function () {
-        if (document.getElementById('chatMessages')) loadMessages_(); else stopChatPoll_();
+        if (document.getElementById('chatMessages')) { loadMessages_(); refreshDashboardCounts_(); } else stopChatPoll_();
       }, 15000);
     }
 
@@ -943,8 +969,31 @@
         input.disabled = false;
         input.focus();
         renderMessages_(data);
+        refreshDashboardCounts_(); // 返信したので、この人の未返信バッジを消す
       }).catch(function (err) {
         input.disabled = false;
+        if (errorEl) errorEl.textContent = err.message;
+      });
+    }
+
+    // 未返信メッセージがある人にだけ「対応済みにする」ボタンを出す(返信不要なメッセージ用)
+    function renderChatHandledBtn_() {
+      var area = document.getElementById('chatHandledArea');
+      if (!area) return;
+      var data = window.__lastDashboard;
+      var row = data && data.rows.filter(function (r) { return r.id === CURRENT_DETAIL_ID; })[0];
+      area.innerHTML = row && row.unrepliedCount
+        ? '<button class="btn ghost" onclick="markChatHandled()" title="返信せずに未返信バッジを消します">対応済みにする（返信不要）</button>'
+        : '';
+    }
+
+    function markChatHandled() {
+      var errorEl = document.getElementById('chatSendError');
+      if (errorEl) errorEl.textContent = '';
+      callServer_('adminMarkMessagesHandled', [CURRENT_DETAIL_ID]).then(function () {
+        showToast('対応済みにしました');
+        refreshDashboardCounts_();
+      }).catch(function (err) {
         if (errorEl) errorEl.textContent = err.message;
       });
     }

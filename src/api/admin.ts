@@ -57,7 +57,7 @@ import {
   createNewAddibleCustomItemRecordCode
 } from '../jinjer';
 import { replaceMunicipalities, findMunicipalityCode, countMunicipalities } from '../db/jinjerMunicipalities';
-import { listMessages, insertOutboundMessage, findMessageById, getUnrepliedCounts, getLatestMessages, LineMessageRow } from '../db/lineMessages';
+import { listMessages, insertOutboundMessage, markMessagesHandled, findMessageById, getUnrepliedCounts, getLatestMessages, LineMessageRow } from '../db/lineMessages';
 
 class ApiError extends Error {}
 
@@ -393,6 +393,15 @@ export async function adminSendMessage(env: Env, email: string, employeeId: stri
   if (!result.sent) throw new ApiError(`LINEへの送信に失敗しました（${result.reason || '不明なエラー'}）`);
   await insertOutboundMessage(env.DB, employeeId, trimmed, email);
   return adminGetMessages(env, email, employeeId);
+}
+
+// 返信不要なメッセージ(お礼・了解の連絡など)の未返信バッジを、返信せずに消す
+export async function adminMarkMessagesHandled(env: Env, email: string, employeeId: string) {
+  await requireAdmin(env, email);
+  const employee = await findEmployeeById(env.DB, employeeId);
+  if (!employee) throw new ApiError('新入社員情報が見つかりません');
+  await markMessagesHandled(env.DB, employeeId, email);
+  return { ok: true };
 }
 
 // 法人ごとのマイナンバー閲覧権限(admin.MyNumberCompanies)を、その法人フォルダのDrive閲覧権限として
