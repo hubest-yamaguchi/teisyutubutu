@@ -681,6 +681,12 @@
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
+    // 書類の説明文(管理画面の書類マスタで編集)。[赤]〜[/赤] で囲んだ部分だけ赤文字にする。
+    // 先にエスケープしてから置き換えるので、説明文にタグを書かれても実行はされない
+    function descHtml_(v) {
+      return escHtml_(v).replace(/\[赤\]([\s\S]*?)\[\/赤\]/g, '<span style="color:#C1443A;">$1</span>');
+    }
+
     function escAttr_(v) {
       return escHtml_(v).replace(/"/g, '&quot;');
     }
@@ -774,7 +780,7 @@
       }).join('');
       document.getElementById('uploadArea').innerHTML =
         '<div class="card"><h2>' + doc.label + 'の提出</h2>' +
-        (doc.description ? '<p class="muted" style="white-space:pre-wrap;">' + escHtml_(doc.description) + '</p>' : '') +
+        (doc.description ? '<p class="muted" style="white-space:pre-wrap;">' + descHtml_(doc.description) + '</p>' : '') +
         templateHtml +
         samplesHtml +
         fileSection +

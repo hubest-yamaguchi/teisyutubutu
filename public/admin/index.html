@@ -61,6 +61,9 @@
     table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #DBE1DF; border-radius:14px; overflow:hidden; }
     th, td { text-align:left; padding:10px 14px; border-bottom:1px solid #EEF0F1; font-size:.85rem; }
     th { background:#E8EBEA; font-size:.7rem; text-transform:uppercase; color:#8A9490; }
+    /* 新入社員一覧: 文字サイズはそのまま、セル内で改行させない。画面が狭い時は表だけ横スクロールする */
+    .table-scroll { overflow-x:auto; border-radius:14px; }
+    .emp-table th, .emp-table td:not([colspan]) { white-space:nowrap; padding:10px 10px; }
     tr.row:hover { background:#F6F8F7; cursor:pointer; }
     .pill { display:inline-block; font-size:.72rem; font-weight:700; padding:3px 10px; border-radius:999px; }
     .st-未提出 { background:#EEF0F1; color:#8B929A; }
@@ -1292,14 +1295,15 @@
         '</div>' +
         '<div class="card"><h2>登録済みの新入社員一覧</h2>' +
         '<p class="muted">氏名・フリガナ・職種・入社予定日は「編集」から社員ごとに個別修正できます。テスト登録などを取り消したい場合は「削除」してください（提出済みの書類・履歴も一緒に削除されます）。</p>' +
-        '<table><thead><tr><th>氏名</th><th>フリガナ</th><th>職種</th><th>配属先</th><th>区分</th><th>入社予定日</th><th>本人確認済み</th><th>jinjer社員番号</th><th></th></tr></thead><tbody>' +
+        '<div class="table-scroll"><table class="emp-table"><thead><tr><th>氏名</th><th>フリガナ</th><th>職種</th><th>配属先</th><th>区分</th><th>入社予定日</th><th>本人確認済み</th><th>jinjer社員番号</th><th></th></tr></thead><tbody>' +
         (s.employees.length ? s.employees.map(function (emp) {
           return '<tr><td>' + emp.name + '</td><td>' + emp.kana + '</td><td>' + (emp.jobType || '-') + '</td><td>' + (emp.company || '<span style="color:#C1443A;">職種法人マスタに未登録</span>') + '</td>' +
             '<td>' + (emp.hireType || '未回答') + '</td>' +
             '<td>' + (emp.hireDate || '未設定') + '</td>' +
             // 本人がLINEの確認画面で「はい(合っています)」を選ぶと自動でチェックが入る(手動では変更しない)
             '<td style="text-align:center;"><input type="checkbox" disabled' + (emp.identityConfirmedAt ? ' checked' : '') + '>' +
-            (emp.identityConfirmedAt ? '<div class="muted">' + escHtml_(emp.identityConfirmedAt) + '</div>' : '') + '</td>' +
+            // 幅を取らないよう日付だけ表示し、時刻はマウスを乗せると出る
+            (emp.identityConfirmedAt ? ' <span class="muted" title="' + escAttr(emp.identityConfirmedAt) + '">' + escHtml_(emp.identityConfirmedAt.slice(0, 10)) + '</span>' : '') + '</td>' +
             '<td>' + (emp.jinjerEmployeeId || '未設定') + (emp.jinjerSyncedAt ? '<div class="muted">送信済み ' + emp.jinjerSyncedAt + '</div>' : '') + '</td>' +
             '<td><button class="btn ghost" onclick="toggleEditEmployee(\'' + emp.id + '\')">編集</button> ' +
             '<button class="btn danger" onclick="removeEmployee(\'' + emp.id + '\',\'' + escAttr(emp.name) + '\')">削除</button></td></tr>' +
@@ -1316,7 +1320,7 @@
             '<div style="height:8px;"></div><button class="btn" onclick="saveEmployeeEdit(\'' + emp.id + '\')">この内容で保存</button>' +
             '</td></tr>';
         }).join('') : '<tr><td colspan="9" class="muted">まだ登録されていません</td></tr>') +
-        '</tbody></table></div>'
+        '</tbody></table></div></div>'
       );
 
       // テンプレート編集
@@ -1481,6 +1485,7 @@
               '<input type="text" id="doc-' + i + '-condval" value="' + escAttr(condVal) + '" placeholder="条件の値(通勤手段: 車/自転車など、免許証: あり)" style="width:260px;">' +
               '</div>' +
               '<textarea id="doc-' + i + '-desc" rows="6" style="margin-top:6px;" placeholder="説明文">' + escHtml_(d.description || '') + '</textarea>' +
+              '<div class="muted" style="margin-top:2px;">赤文字にしたい部分は <b>[赤]</b>〜<b>[/赤]</b> で囲んでください（例：[赤]事前にご連絡ください[/赤]）</div>' +
               '<div class="muted" style="margin-top:8px;">見本画像（任意。1行に1件、「画像URL」または「画像URL|説明文」の形式）</div>' +
               '<textarea id="doc-' + i + '-samples" rows="2" style="margin-top:2px;" placeholder="/liff/samples/xxx.png|説明文">' +
               escHtml_((d.sampleImages || []).map(function (si) { return si.url + (si.caption ? '|' + si.caption : ''); }).join('\n')) +
